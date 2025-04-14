@@ -6,8 +6,11 @@ const MapComponent = () => {
   const mapContainerRef = useRef(null);
 
   useEffect(() => {
-    const MAPTILER_KEY = 'get_your_own_OpIi9ZULNHzrESv6T2vL';
-
+    const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY
+      if (!MAPTILER_KEY) {
+        setMapError('MapTiler API key not found. Please configure a valid key in environment variables.');
+        return;
+      }
     const map = new maplibregl.Map({
       style: `https://api.maptiler.com/maps/basic-v2/style.json?key=${MAPTILER_KEY}`,
       center: [-111.9400, 33.4255],
@@ -75,7 +78,6 @@ const MapComponent = () => {
       );
     });
 
-    // Cleanup on unmount
     return () => map.remove();
   }, []);
 

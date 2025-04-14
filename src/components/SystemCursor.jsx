@@ -81,7 +81,7 @@ const SystemCursor = () => {
 
   return (
     <div 
-      className="fixed pointer-events-none z-50 select-none hidden lg:block"
+      className="fixed pointer-events-none z-[9999] select-none hidden lg:block"
       style={{ 
         left: `${position.x}px`, 
         top: `${position.y}px`,
