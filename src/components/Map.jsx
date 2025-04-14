@@ -8,7 +8,7 @@ const MapComponent = () => {
   useEffect(() => {
     const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY
       if (!MAPTILER_KEY) {
-        setMapError('MapTiler API key not found. Please configure a valid key in environment variables.');
+        console.error('MapTiler API key not found. Please configure a valid key in environment variables.');
         return;
       }
     const map = new maplibregl.Map({
