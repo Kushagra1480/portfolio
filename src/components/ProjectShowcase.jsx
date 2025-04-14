@@ -19,6 +19,12 @@ import cd3url from '../assets/cd-3.png'
 
 import wv1url from '../assets/wv-1.png'
 
+import ser1url from '../assets/ser-1.png'
+import ser2url from '../assets/ser-2.png'
+import ser3url from '../assets/ser-3.png'
+import ser4url from '../assets/ser-4.png'
+
+
 
 
 const ExpandedProjectCard = ({
@@ -103,21 +109,27 @@ const ExpandedProjectCard = ({
           {/* Links */}
           <div>
             <div className="flex items-center mb-3">
-              <div className="w-1 h-5 bg-cyan-400 mr-2"></div>
-              <h3 className="text-cyan-400 font-bold">ACCESS_POINTS</h3>
+              {!links[0] && !links[1] (
+                <>
+                  <div className="w-1 h-5 bg-cyan-400 mr-2"></div>
+                  <h3 className="text-cyan-400 font-bold">ACCESS_POINTS</h3>
+                </>
+              )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <a
-                href={links[0]}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="border border-cyan-500/30 bg-slate-800/60 text-cyan-300 hover:bg-cyan-900/30 hover:text-cyan-100 py-2 px-4 rounded flex items-center justify-center"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
-                  <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
-                </svg>
-                <span>SOURCE_CODE</span>
-              </a>
+              {links[0] && (
+                <a
+                  href={links[0]}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="border border-cyan-500/30 bg-slate-800/60 text-cyan-300 hover:bg-cyan-900/30 hover:text-cyan-100 py-2 px-4 rounded flex items-center justify-center"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+                    <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+                  </svg>
+                  <span>SOURCE_CODE</span>
+                </a>
+              )}
               {links[1] && (
                 <a
                   href={links[1]}
@@ -160,7 +172,7 @@ const HexBorder = ({ children, onClick }) => (
 const ProjectCard = ({ imageUrl, title, description, links, stack, onClick }) => {
   return (
     <HexBorder onClick={onClick}>
-      <div className="relative bg-slate-900/90 border border-blue-900/50 group">
+      <div className="relative bg-slate-900/90 border border-blue-900/50 group rounded rounded-xl">
         {/* Decorative elements */}
         <div className="absolute top-0 left-0 w-16 h-px bg-gradient-to-r from-cyan-500 to-transparent" />
         <div className="absolute top-0 left-0 w-px h-16 bg-gradient-to-b from-cyan-500 to-transparent" />
@@ -253,7 +265,7 @@ const ProjectCard = ({ imageUrl, title, description, links, stack, onClick }) =>
             <img
               src={imageUrl}
               alt={title}
-              className="w-full h-96 object-cover filter brightness-75 group-hover:brightness-100 transition-all duration-500"
+              className="w-180 h-96 object-cover filter brightness-75 group-hover:brightness-100 transition-all duration-500 rounded rounded-lg"
             />
             <div className="absolute top-2 right-2 bg-slate-900/90 px-2 py-1 text-xs font-mono text-cyan-400 border border-blue-900/50">
               PROJECT_ID::{title.toUpperCase().replace(' ', '_')}
@@ -292,7 +304,7 @@ const ProjectCard = ({ imageUrl, title, description, links, stack, onClick }) =>
                   href={links[0]}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex-1 px-4 py-2 bg-slate-800 border border-blue-900/50 text-cyan-400 text-sm font-mono hover:border-cyan-500/50 hover:text-cyan-300 transition-colors flex items-center justify-center gap-2 group"
+                  className="flex-1 px-4 py-2 bg-slate-800 border border-blue-900/50 text-cyan-400 text-sm font-mono hover:border-cyan-500/50 hover:text-cyan-300 transition-colors flex items-center justify-center gap-2 group rounded rounded-lg"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <span className="w-2 h-2 bg-cyan-400 group-hover:bg-cyan-300" />
@@ -301,7 +313,7 @@ const ProjectCard = ({ imageUrl, title, description, links, stack, onClick }) =>
               ) : (
                 <button
                   disabled
-                  className="flex-1 px-4 py-2 bg-slate-800/50 border border-slate-700/50 text-slate-500 text-sm font-mono cursor-not-allowed flex items-center justify-center gap-2"
+                  className="flex-1 px-4 py-2 bg-slate-800/50 border border-slate-700/50 text-slate-500 text-sm font-mono cursor-not-allowed flex items-center justify-center gap-2 rounded rounded-lg"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <span className="w-2 h-2 bg-slate-500" />
@@ -314,7 +326,7 @@ const ProjectCard = ({ imageUrl, title, description, links, stack, onClick }) =>
                   href={links[1]}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex-1 px-4 py-2 bg-blue-950 border border-blue-900/50 text-cyan-400 text-sm font-mono hover:border-cyan-500/50 hover:text-cyan-300 transition-colors flex items-center justify-center gap-2 group"
+                  className="flex-1 px-4 py-2 bg-blue-950 border border-blue-900/50 text-cyan-400 text-sm font-mono hover:border-cyan-500/50 hover:text-cyan-300 transition-colors flex items-center justify-center gap-2 group rounded rounded-lg"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <span className="w-2 h-2 bg-cyan-400 group-hover:bg-cyan-300" />
@@ -323,7 +335,7 @@ const ProjectCard = ({ imageUrl, title, description, links, stack, onClick }) =>
               ) : (
                 <button
                   disabled
-                  className="flex-1 px-4 py-2 bg-slate-800/50 border border-slate-700/50 text-slate-500 text-sm font-mono cursor-not-allowed flex items-center justify-center gap-2"
+                  className="flex-1 px-4 py-2 bg-slate-800/50 border border-slate-700/50 text-slate-500 text-sm font-mono cursor-not-allowed flex items-center justify-center gap-2 rounded rounded-lg"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <span className="w-2 h-2 bg-slate-500" />
@@ -363,7 +375,7 @@ export const ProjectShowcase = () => {
       stack: ['Vue', 'Typescript', 'Chart.js', 'Springboot', 'Flask', 'Python', 'Docker', 'SQL'],
     },
     {
-      imageUrl: [ohackUrl],
+      imageUrl: [ser1url, ser2url, ser3url, ser4url],
       title: "2D/ 3D Rendering in the Web",
       description: "A tutorial website elaborating on graphics rendering in the web",
       links: [
@@ -387,8 +399,8 @@ export const ProjectShowcase = () => {
       title: "Word Weave",
       description: "LLM Word Search Game",
       links: [
+        '',
         'https://words-weave.com/',
-        ''
       ],
       stack: ['React', 'Javascript', 'Golang', 'Python', 'SQlite'],
     },
@@ -430,7 +442,7 @@ export const ProjectShowcase = () => {
           PROJECT_ARCHIVES
         </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-10">
       {projects.map((project, index) => (
         <ProjectCard
           key={index}
