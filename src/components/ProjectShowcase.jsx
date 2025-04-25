@@ -81,7 +81,6 @@ const ExpandedProjectCard = ({
         </div>
 
         <div className="p-6">
-          {/* Project description */}
           <div className="mb-6">
             <div className="flex items-center mb-3">
               <div className="w-1 h-5 bg-cyan-400 mr-2"></div>
@@ -90,7 +89,6 @@ const ExpandedProjectCard = ({
             <p className="text-cyan-100 text-sm leading-relaxed">{description}</p>
           </div>
 
-          {/* Technologies used */}
           <div className="mb-6">
             <div className="flex items-center mb-3">
               <div className="w-1 h-5 bg-cyan-400 mr-2"></div>
@@ -106,10 +104,9 @@ const ExpandedProjectCard = ({
             </div>
           </div>
 
-          {/* Links */}
           <div>
             <div className="flex items-center mb-3">
-              {!links[0] && !links[1] (
+              {!links[0] && !links[1] && (
                 <>
                   <div className="w-1 h-5 bg-cyan-400 mr-2"></div>
                   <h3 className="text-cyan-400 font-bold">ACCESS_POINTS</h3>
@@ -173,11 +170,9 @@ const ProjectCard = ({ imageUrl, title, description, links, stack, onClick }) =>
   return (
     <HexBorder onClick={onClick}>
       <div className="relative bg-slate-900/90 border border-blue-900/50 group rounded rounded-xl">
-        {/* Decorative elements */}
         <div className="absolute top-0 left-0 w-16 h-px bg-gradient-to-r from-cyan-500 to-transparent" />
         <div className="absolute top-0 left-0 w-px h-16 bg-gradient-to-b from-cyan-500 to-transparent" />
         
-        {/* Mobile Layout */}
         <div className="block lg:hidden">
           {/* Header with small image */}
           <div className="relative h-32">
@@ -257,9 +252,7 @@ const ProjectCard = ({ imageUrl, title, description, links, stack, onClick }) =>
           </div>
         </div>
 
-        {/* Desktop Layout - Original design */}
         <div className="hidden lg:block">
-          {/* Image section */}
           <div className="relative overflow-hidden">
             <div className="absolute inset-0 via-transparent to-transparent z-10" />
             <img
@@ -272,7 +265,6 @@ const ProjectCard = ({ imageUrl, title, description, links, stack, onClick }) =>
             </div>
           </div>
 
-          {/* Content section */}
           <div className="p-4 space-y-4">
             <div className="space-y-1">
               <div className="text-xs text-cyan-400 font-mono">PROJECT_NAME</div>
@@ -360,7 +352,7 @@ export const ProjectShowcase = () => {
       description: "Visualizing trends in employment from the BLS at the WP Carey Seidman Research Institute",
       links: [
         '',
-        'https://dev-azsmart.ws.asu.edu/jg-charts-historical/',
+        'https://dev-azsmart.ws.asu.edu/jg-charts-historical/'
       ],
       stack: ['Javascript', 'D3.js', 'PHP', 'CSS', 'Datatables', 'SQL', 'Python'],
     },

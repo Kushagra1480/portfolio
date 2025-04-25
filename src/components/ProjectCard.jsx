@@ -9,22 +9,14 @@ const ProjectCard = ({ imageUrl, title, description, links, stack }) => {
             className="w-full h-64"
           />
 
-      {/* Card Body */}
       <div className="p-4">
-        {/* Title */}
         <h2 className="text-xl font-bold mb-2 text-white">{title}</h2>
-
-        {/* Description */}
         <p className="text-gray-700 text-sm mb-4 text-zinc-300">{description}</p>
-
-        {/* Powered By Row */}
         <div className="text-sm text-gray-600 mb-4 text-slate-400">
           <span className="font-semibold">Powered by:</span> {stack.join(', ')}
         </div>
 
-        {/* Buttons Row */}
         <div className="flex space-x-4">
-          {/* GitHub Button */}
           <a
             href={links[0]}
             target="_blank"
@@ -35,7 +27,6 @@ const ProjectCard = ({ imageUrl, title, description, links, stack }) => {
             Source Code
           </a>
 
-          {/* Visit/Preview Button */}
           {links[1] ? (
             <a
               href={links[1]}
