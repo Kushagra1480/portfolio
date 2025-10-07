@@ -1,4 +1,5 @@
 import { Tag, Globe, GithubIcon } from "lucide-react";
+import bridgeImg from "./assets/bridge.jpg";
 
 const Portfolio = () => {
   const projects = [
@@ -72,7 +73,7 @@ const Portfolio = () => {
 
           <div className="flex">
             <div>
-              <img src="src/assets/bridge.jpg" />
+              <img src={bridgeImg} />
               <p>
                 <a
                   href="https://github.com/Kushagra1480"
