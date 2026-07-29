@@ -1,0 +1,45 @@
+---
+import Base from '../layouts/Base.astro';
+---
+<Base title="Projects — Kushagra Kartik">
+  <div class="placeholder">
+    <div class="kicker">Projects</div>
+    <h1>Projects</h1>
+    <p>In progress — check back soon.</p>
+  </div>
+</Base>
+
+<style>
+  .placeholder {
+    max-width: 940px;
+    margin: 0 auto;
+    min-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 180px 0 96px;
+  }
+  .kicker {
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted-4);
+    margin-bottom: 20px;
+  }
+  h1 {
+    font-size: 62px;
+    line-height: 1.04;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    margin: 0 0 20px;
+  }
+  p {
+    font-size: 21px;
+    line-height: 1.45;
+    color: var(--muted-1);
+    margin: 0;
+    max-width: 520px;
+    text-wrap: pretty;
+  }
+</style>

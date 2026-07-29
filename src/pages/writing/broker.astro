@@ -1,0 +1,19 @@
+---
+import Article from '../../layouts/Article.astro';
+import body from '../../content/broker.html?raw';
+const mermaid = [
+  'sequenceDiagram',
+  '    participant Host as job scheduler (trusted)',
+  '    participant Sandbox as sandboxed agent',
+  '    participant Broker as credential broker',
+  '    participant API as third-party API',
+  '    Host->>Host: mint JWT (tenant_id, job_id, exp)',
+  '    Host->>Sandbox: inject token at startup, no secrets',
+  '    Sandbox->>Broker: call (connection_id, method, path) + Bearer JWT',
+  '    Broker->>Broker: verify JWT, read tenant_id from claims',
+  '    Broker->>API: real call with server-held credential, scoped to tenant_id',
+  '    API-->>Broker: data',
+  '    Broker-->>Sandbox: data only',
+].join('\n');
+---
+<Article title="A token broker that let my sandbox call APIs it could never authenticate to" body={body} mermaid={mermaid} />

@@ -1,0 +1,100 @@
+---
+import Base from './Base.astro';
+
+interface Props {
+  title: string;
+  body: string;
+  mermaid?: string;
+}
+
+const { title, body, mermaid } = Astro.props;
+---
+<Base title={`${title} — Kushagra Kartik`} description={title}>
+  <div class="article" set:html={body}></div>
+</Base>
+
+{mermaid && <script is:inline set:html={`window.__mermaidSrc=${JSON.stringify(mermaid)};`} />}
+
+{mermaid && (
+  <script is:inline>
+    (function () {
+      function draw() {
+        const el = document.querySelector('.mermaid-target');
+        const src = window.__mermaidSrc;
+        if (!el || !src) return;
+        if (el.__done && el.querySelector("svg:not([aria-roledescription='error'])")) return;
+        function run() {
+          if (!window.mermaid) return;
+          el.__done = true;
+          el.removeAttribute('data-processed');
+          el.textContent = src;
+          window.mermaid.initialize({
+            startOnLoad: false,
+            theme: 'base',
+            securityLevel: 'loose',
+            fontFamily: "'JetBrains Mono', monospace",
+            themeVariables: {
+              primaryColor: '#F8F8F8',
+              primaryBorderColor: '#94a5b6',
+              primaryTextColor: '#111111',
+              lineColor: '#8a8276',
+              actorBkg: '#EAEEF4',
+              actorBorder: '#94a5b6',
+              actorTextColor: '#111111',
+              signalColor: '#455d76',
+              signalTextColor: '#1f2731',
+              noteBkgColor: '#161a20',
+              noteTextColor: '#e4e8ee',
+              noteBorderColor: '#161a20',
+            },
+          });
+          try { window.mermaid.run({ nodes: [el] }); } catch (e) {}
+        }
+        if (window.mermaid) { run(); return; }
+        if (window.__mermaidLoading) { window.__mermaidLoading.then(run); return; }
+        window.__mermaidLoading = new Promise((res) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
+          s.onload = res;
+          document.head.appendChild(s);
+        });
+        window.__mermaidLoading.then(run);
+      }
+      if (!window.__mermaidHooked) {
+        window.__mermaidHooked = true;
+        document.addEventListener('astro:page-load', draw);
+      }
+      draw();
+    })();
+  </script>
+)}
+
+<style is:global>
+  .article { max-width: 680px; margin: 0 auto; }
+  .article a { text-decoration: none; }
+  .article p a,
+  .article li a {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+    text-decoration-color: #C1CBD7;
+    transition: color 0.3s ease, text-decoration-color 0.3s ease;
+  }
+  .article p a:hover,
+  .article li a:hover {
+    color: #476080;
+    text-decoration-color: #476080;
+  }
+  .mermaid-target {
+    background: #ffffff;
+    border: 1px solid #DCE2EA;
+    border-radius: 12px;
+    padding: 26px 20px;
+    margin: 0;
+    overflow-x: auto;
+    display: flex;
+    justify-content: center;
+    min-height: 280px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+</style>

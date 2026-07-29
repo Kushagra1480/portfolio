@@ -1,0 +1,127 @@
+<article style="max-width:680px;margin:0 auto;transition:opacity 0.34s ease,transform 0.42s cubic-bezier(0.4,0,0.2,1);" data-page="1">
+
+    <header style="margin:0 0 56px;">
+      <a href="/writing" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#68809a;text-decoration:none;display:inline-block;margin:28px 0 24px;">← writing</a>
+      <div style="position:relative;width:100%;aspect-ratio:16/9;border-radius:16px;overflow:hidden;background:#1B3A5C;box-shadow:0 30px 70px -34px rgba(20,32,48,0.5);">
+        <img src="/images/migrations.webp" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" />
+        <div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,18,30,0.15) 0%, rgba(10,18,30,0.12) 42%, rgba(10,18,30,0.72) 100%);"></div>
+        <div style="position:absolute;left:0;right:0;bottom:0;padding:36px 38px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.82);margin-bottom:16px;">Migrations · Live systems</div>
+          <h1 style="font-size:44px;line-height:1.08;font-weight:500;letter-spacing:-0.02em;margin:0;color:#FFFFFF;text-wrap:pretty;text-shadow:0 2px 24px rgba(8,14,24,0.45);">The rename you're afraid to do: migrating a live database without a big bang</h1>
+        </div>
+      </div>
+    </header>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The scariest one-line diff I've ever written was a column rename. It compiled. The tests passed. And if I'd shipped it, every row already sitting in the production table would have stopped decoding the instant the new code deployed — because the column those rows were written under no longer existed in the struct reading them back. Records don't error politely when the shape changes underneath them. They just disappear.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">I've since led a big refactor of a live, stateful service — renaming its primary key, collapsing two fields into one, and deleting a whole layer of the stack — without ever leaving a required caller unable to read its own data. It ran as a sequence of small, independently shippable steps instead of one heroic merge. This is the playbook, because the <em>ordering</em> is the whole lesson, and it generalizes to any migration where the data outlives the deploy.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">The mental model: a ratchet, not a checklist</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The sequence I keep coming back to:</p>
+
+    <blockquote style="margin:0 0 30px;padding:16px 24px;border-left:2px solid #94a5b6;font-family:'JetBrains Mono',monospace;font-size:15px;line-height:1.6;color:#3f566e;background:#EDF1F6;border-radius:0 10px 10px 0;">delete dead code → change the wire → migrate the store → delete the scaffolding → reroute callers → add features</blockquote>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Each arrow is "this must be true before that can safely start." It's a ratchet: every step makes the next one's blast radius smaller. Three of these moves are the ones worth internalizing.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">Move 1: delete the dead code first — but prove it's dead</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Before touching anything live, I deleted code that <em>looked</em> wired but wasn't: a service layer whose main method returned "not found" on every call and had zero callers, and a background sync loop that only ever ran in local dev because production never wrote the file it watched. It had been a silent no-op in prod for its entire life.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The rule isn't "delete boldly." It's <strong style="font-weight:600;">prove death before the funeral</strong> — grep for callers, trace the production path, confirm the dead return. Dead code that survives into a migration isn't neutral; it's one more shape your migration has to be correct against, for zero benefit. Removing it first meant the real work had one code path to reason about instead of three.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">Move 2: change the contract before you move the data</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">This is the one people get backwards. I changed the API contract — the wire types every consumer speaks — a full step <em>before</em> touching a single stored row.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Why not migrate the data first? Because if the store changes shape while every reader is still typed to the old contract, the readers choke on the new rows. Flip it: change the wire first, regenerate the client stubs, update every consumer to speak the new shape, ship it. Now the whole system can <em>hold</em> the new shape even though the store is still emitting the old one. The data catches up in the next step, and there's a ready audience waiting for it.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">A small durable habit from this: when you retire a serialized field, don't just delete its tag — <strong style="font-weight:600;">reserve it</strong>, so a future field can't accidentally claim the same slot and decode old bytes into a new, wrong meaning. One line, and it saves someone a genuinely confusing afternoon years later.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">Move 3: the dual-shape store</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Here's the pattern I reach for whenever a live schema has to change. The store passes through four states:</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><strong style="font-weight:600;">State 1 — read both, write canonical.</strong> The table understands both the new columns and the old ones, so existing rows still decode. But the <em>writer</em> only ever emits the new shape. The <em>reader</em> prefers the new field and falls back to the old:</p>
+
+    <pre style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#e4e8ee;background:#161a20;border:1px solid #2a2f38;border-radius:12px;padding:22px 22px;overflow-x:auto;margin:0 0 30px;"><span style="color:#6e7c8c;">// Reader is permissive: new shape wins, old shape is the fallback.</span>
+func DecodeRecord(doc map[string]any) (Record, error) {
+    var r Record
+
+    <span style="color:#6e7c8c;">// new key → old key → derive from the record id (oldest rows had neither)</span>
+    if v, ok := doc[<span style="color:#9ec2e6;">"tenant_id"</span>].(string); ok &amp;&amp; v != <span style="color:#9ec2e6;">""</span> {
+        r.TenantID = v
+    } else if v, ok := doc[<span style="color:#9ec2e6;">"owner_id"</span>].(string); ok &amp;&amp; v != <span style="color:#9ec2e6;">""</span> {
+        r.TenantID = v        <span style="color:#6e7c8c;">// legacy field</span>
+    } else {
+        r.TenantID = idPrefix(doc[<span style="color:#9ec2e6;">"_id"</span>])
+    }
+
+    <span style="color:#6e7c8c;">// two old loose strings collapsed into one typed id</span>
+    if v, ok := doc[<span style="color:#9ec2e6;">"kind_id"</span>].(string); ok &amp;&amp; v != <span style="color:#9ec2e6;">""</span> {
+        r.KindID = v
+    } else if grp, ok := doc[<span style="color:#9ec2e6;">"group"</span>].(string); ok {
+        r.KindID = grp + <span style="color:#9ec2e6;">"/"</span> + str(doc[<span style="color:#9ec2e6;">"sub"</span>])  <span style="color:#6e7c8c;">// reconstruct from the pair</span>
+    }
+
+    if r.TenantID == <span style="color:#9ec2e6;">""</span> || r.KindID == <span style="color:#9ec2e6;">""</span> {
+        return r, fmt.Errorf(<span style="color:#9ec2e6;">"record %v: undecodable in either shape"</span>, doc[<span style="color:#9ec2e6;">"_id"</span>])
+    }
+    return r, nil
+}
+
+<span style="color:#6e7c8c;">// Writer is strict: canonical only. Legacy keys are never emitted again.</span>
+func (r Record) Document() map[string]any {
+    return map[string]any{
+        <span style="color:#9ec2e6;">"tenant_id"</span>: r.TenantID,
+        <span style="color:#9ec2e6;">"kind_id"</span>:   r.KindID,
+        <span style="color:#6e7c8c;">// old owner_id / group / sub intentionally omitted</span>
+    }
+}</pre>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The asymmetry <em>is</em> the design: <strong style="font-weight:600;">reads are permissive, writes are strict.</strong> Any time an old row gets touched for any reason, it silently upgrades to the new shape on write-back. The dataset heals itself as normal traffic flows through it.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><strong style="font-weight:600;">State 2 — migrate out-of-band.</strong> A one-shot job walks the table, decodes each row, and rewrites the stragglers that ordinary traffic hasn't touched yet. It's idempotent — it only rewrites a row when the stored shape differs from what the strict writer would produce — so you can run it as many times as you like.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><strong style="font-weight:600;">State 3 — delete the fallbacks, a step later.</strong> Once every row is canonical, the fallback branches and the migrator are dead weight. Delete them. A migration tool that sticks around is a liability: eventually someone runs it against a database it no longer understands.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">So the ladder is <strong style="font-weight:600;">read-both → write-canonical → migrate → delete-fallbacks.</strong> At no instant is a required row unreadable, and at no instant is the old shape both <em>required</em> and <em>unsupported</em>. That second property is the one that lets you sleep.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">The same shape shows up in security cutovers</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">This ladder isn't just for schema. I've used the identical sequencing to tighten a security boundary — flipping a check from "warn and allow" to "reject."</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">There was an isolation check that, on a mismatch, logged a warning and then served the request anyway. Flipping it straight to a hard rejection would have broken every caller quietly relying on the leniency. So instead: <strong style="font-weight:600;">enforce-but-tolerate → migrate callers → remove tolerance.</strong> Make the strict check load-bearing, but <em>also</em> keep widening the parser to accept the old inputs; migrate every caller to the strict shape behind that tolerance; add regression tests pinning the invariant; and only <em>then</em> strip the tolerant branches and lock strict-mode on.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The invariant is identical to the schema case: <strong style="font-weight:600;">nothing is ever both required and unmigrated at the same time.</strong> Whether you're renaming a column or hardening an auth check, the removal of the old path always comes last.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">The corollary: if a layer only reshapes data, it's a liability</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Midway through, I also deleted an entire layer — a per-consumer wrapper that translated a platform contract into consumer-shaped messages. It had produced a steady drip of bugs, and they were all the same bug: a translation layer drifts from the contract it fronts. A field silently dropped in conversion here, a wrong id substituted there. Rather than fix each one, I deleted the wrapper and replaced it with a tiny content-blind reverse proxy that does auth and routing and forwards the request verbatim.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The test I now apply to any layer like this:</p>
+
+    <blockquote style="margin:0 0 30px;padding:16px 24px;border-left:2px solid #94a5b6;font-size:20px;line-height:1.5;color:#3f566e;font-style:italic;background:#EDF1F6;border-radius:0 10px 10px 0;">If a layer only <em>reshapes</em> data — renames fields, restructures bodies — it's a liability. A layer that earns its place does auth, routing, or request-shaping and is otherwise <strong style="font-weight:600;font-style:normal;">replaceable by <code style="font-family:'JetBrains Mono',monospace;font-size:0.8em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">curl</code></strong>. If you can reproduce it with a shell one-liner and a header, it's pulling its weight; if it's rewriting payloads, it's a bug waiting to happen.</blockquote>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">What to steal</h2>
+
+    <ul style="list-style:none;padding:0;margin:0 0 26px;">
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">Sequence the work so each step shrinks the next one's blast radius.</strong> Delete dead code → wire → store → callers → features. It ratchets.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">Change the contract before you move the data.</strong> Consumers must be able to hold the new shape before any data arrives in it.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">Dual-shape reads, canonical-only writes, out-of-band migrate, delete fallbacks a step later.</strong> Reads permissive, writes strict — the dataset heals as it runs.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">For security cutovers, enforce-but-tolerate → migrate → remove tolerance.</strong> Same invariant as a schema migration: never leave the old path both required and unsupported.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">Reserve retired serialized-field tags</strong> so old bytes can't decode into a new meaning.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:0;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">A layer that only reshapes data is a liability.</strong> The test is "replaceable by curl." Delete the reshaping veneer; keep the thin proxy.</li>
+    </ul>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The version of you that's scared of the one-line rename is right to be scared. The fix isn't more courage. It's more phases.</p>
+
+    <footer style="padding-top:64px;margin-top:56px;border-top:1px solid #E1E5EB;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;">
+      <a href="/writing" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#68809a;text-decoration:none;">← all writing</a>
+      <div style="display:flex;gap:20px;font-family:'JetBrains Mono',monospace;font-size:13px;">
+        <a href="https://github.com/Kushagra1480" target="_blank" style="text-decoration:none;">GitHub</a>
+        <a href="https://linkedin.com/in/kushagra-kartik" target="_blank" style="text-decoration:none;">LinkedIn</a>
+      </div>
+    </footer>
+
+  </article>

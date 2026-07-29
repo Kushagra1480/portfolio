@@ -1,0 +1,134 @@
+<article style="max-width:680px;margin:0 auto;transition:opacity 0.34s ease,transform 0.42s cubic-bezier(0.4,0,0.2,1);" data-page="1">
+
+    <header style="margin:0 0 56px;">
+      <a href="/writing" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#68809a;text-decoration:none;display:inline-block;margin:28px 0 24px;">← writing</a>
+      <div style="position:relative;width:100%;aspect-ratio:16/9;border-radius:16px;overflow:hidden;background:#1B3A5C;box-shadow:0 30px 70px -34px rgba(20,32,48,0.5);">
+        <img src="/images/queue.webp" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" />
+        <div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,18,30,0.15) 0%, rgba(10,18,30,0.12) 42%, rgba(10,18,30,0.72) 100%);"></div>
+        <div style="position:absolute;left:0;right:0;bottom:0;padding:36px 38px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.82);margin-bottom:16px;">Distributed systems · Queues</div>
+          <h1 style="font-size:44px;line-height:1.08;font-weight:500;letter-spacing:-0.02em;margin:0;color:#FFFFFF;text-wrap:pretty;text-shadow:0 2px 24px rgba(8,14,24,0.45);">The queue was the answer the whole time</h1>
+        </div>
+      </div>
+    </header>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">I once shipped a distributed job system where the single hardest bug had nothing to do with the jobs. The jobs ran fine. They finished, wrote their results, exited clean. The UI just never found out — it sat spinning until it gave up. Everything worked, and the user saw a failure. Those are the ones that stick with you.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Here's the story, because the fix taught me something I now reach for constantly: when a message can't get through, stop hardening the messenger and change the road it travels.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">First, why it was async at all</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The jobs were long — minutes, sometimes. The original design held one HTTP request open for the entire run: client asks, server runs it inline, response comes back when it's done. That works until it meets a load balancer, which idles connections out at ~60 seconds. The job kept running; the client got a gateway timeout. You've paid for the work <em>and</em> told the user it failed.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">So I moved to submit-and-poll, which is the correct shape for anything that can outlive an idle timeout:</p>
+
+    <ul style="list-style:none;padding:0;margin:0 0 26px;">
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:14px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span>Submit returns <strong style="font-weight:600;"><code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">202 Accepted</code></strong> with a <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">job_id</code>, immediately.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:14px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span>The work runs on a background worker pulling from a queue.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:0;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span>The client polls a status endpoint every couple of seconds and only gets a result once the job is terminal.</li>
+    </ul>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">That fixed the timeout and set up the real puzzle.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">The completion signal that couldn't be delivered</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The workers that ran the jobs were intentionally locked down — a sandbox running untrusted code, no credentials, no identity the rest of the platform would accept. When one finished, it had to announce "done, here's the output."</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">My first attempt was an internal HTTP callback with a shared secret so the credential-less worker could still authenticate. Sensible. It didn't work, and when I dug in, the reason was almost funny: the gateway in front of everything only forwarded a fixed set of URL path prefixes. The callback's path matched none of them, so it was dropped at the edge before it reached any handler. I'd carefully solved <em>authentication</em> for a request that was never going to <em>arrive</em>.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The unlock was to stop asking "how do I let this worker make an HTTP call?" and ask "what can this worker already reach?" It was already long-polling a queue for its work. So instead of calling home, it just <strong style="font-weight:600;">puts a completion event on the same queue it reads from</strong>:</p>
+
+    <pre style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#e4e8ee;background:#161a20;border:1px solid #2a2f38;border-radius:12px;padding:22px 22px;overflow-x:auto;margin:0 0 30px;"><span style="color:#6e7c8c;"># on successful exit</span>
+enqueue({
+  kind:       <span style="color:#9ec2e6;">"job_completion"</span>,
+  job_id:     JOB_ID,
+  tenant_id:  TENANT_ID,
+  output_ref: OUTPUT_REF,
+})</pre>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">And the worker's existing receive loop grows one branch:</p>
+
+    <pre style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#e4e8ee;background:#161a20;border:1px solid #2a2f38;border-radius:12px;padding:22px 22px;overflow-x:auto;margin:0 0 30px;">def handle_message(msg):
+    ctx = restore_context(msg)   <span style="color:#6e7c8c;"># more on this below</span>
+    if msg[<span style="color:#9ec2e6;">"kind"</span>] == <span style="color:#9ec2e6;">"job_completion"</span>:
+        return handle_completion(ctx, msg)
+    return dispatch(ctx, msg)</pre>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">No new network surface. No new auth story. Completion rides the exact channel that dispatch already trusts. The fix wasn't clever code — it was noticing that the whole callback idea was fighting the network shape of the system, and the queue had been sitting there the entire time as the one road that was already open.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">At-least-once: assume every message runs twice</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The queue was a standard at-least-once queue, which means redelivery is normal — on a crash, on a lease expiry, sometimes for no reason you'll ever see. That redelivery is the <em>point</em>: it's what keeps work from vanishing when a worker dies. The price is that every handler has to be safe to run more than once.</p>
+
+    <pre style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#e4e8ee;background:#161a20;border:1px solid #2a2f38;border-radius:12px;padding:22px 22px;overflow-x:auto;margin:0 0 30px;">def handle_completion(ctx, msg):
+    job = get_job_with_retry(ctx, msg[<span style="color:#9ec2e6;">"job_id"</span>])
+    if job is None:
+        <span style="color:#6e7c8c;"># read-after-write lag: the completion event
+        # beat the job's own record. DON'T ack — let
+        # redelivery try again once the write lands.</span>
+        raise RetryLater()
+    if job.is_terminal():          <span style="color:#6e7c8c;"># a duplicate delivery</span>
+        cleanup_index(job.id)      <span style="color:#6e7c8c;"># idempotent</span>
+        return ack(msg)
+    job.mark_completed(load_output(msg[<span style="color:#9ec2e6;">"output_ref"</span>]))
+    save(job)                      <span style="color:#6e7c8c;"># commit the effect...</span>
+    return ack(msg)                <span style="color:#6e7c8c;"># ...THEN remove the message</span></pre>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Two things I'd underline for anyone building on an at-least-once queue:</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><strong style="font-weight:600;">The ack is sacred.</strong> You delete a message <em>only after</em> its effect is durably committed. If a duplicate shows up and the job's already terminal, do nothing and ack. And if you <em>can't</em> process it right now, do <strong style="font-weight:600;">not</strong> ack it to make it go away — leaving it on the queue means it redelivers later, and the queue becomes your retry buffer for free. Acking away a message you failed to handle is how you silently lose data.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><strong style="font-weight:600;">Read-after-write lag is real.</strong> The completion event and the job record are written by different code paths, and a distributed store doesn't guarantee the record is readable the instant the event is. So I retry the lookup a few times over a couple of seconds, and on a persistent miss I <em>keep</em> the message on the queue rather than acking it into the void. (I also lost an afternoon to a not-found error that didn't survive an RPC boundary as a typed error — it arrived as a plain string, so my <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">is-not-found</code> check returned false and quietly disabled the entire retry path. Match your sentinels by message when they cross a wire.)</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">One more multi-tenant trap</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The data was partitioned by tenant, but the workers ran tenant-less — they're just draining a queue, no user context. A tenant-less reader looks in the default partition, doesn't find a job that lives in a customer's partition, and reports it missing. Records that exist but "don't exist."</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The fix is to treat tenant as part of the message contract, not an ambient property: stamp it on the payload at submit time, and restore it before any read or write. The subtle part is remembering to do it on the worker's <em>own</em> re-enqueue paths too — retries, backoffs — or a redelivered message comes back tenant-less and loops forever against the wrong partition.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">The lease you're holding without realizing it</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Receiving a message doesn't remove it; it hides it from other consumers for a visibility window. That window is a lease: "mine for N seconds." Finish and delete, or crash and let it lapse so someone else takes over. If your work can outlast the window, you extend the lease on a heartbeat — otherwise the message reappears <em>while you're still working on it</em> and a second worker starts the same job.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">I shipped this with an off-by-one-interval bug: the heartbeat waited a full tick before its first extension, but the initial visibility window was shorter than a tick. Long tasks let the lease lapse and got redelivered mid-run. The fix is trivial once you see it — extend once immediately, then on every tick:</p>
+
+    <pre style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#e4e8ee;background:#161a20;border:1px solid #2a2f38;border-radius:12px;padding:22px 22px;overflow-x:auto;margin:0 0 30px;">def start_heartbeat(receipt):
+    extend = lambda: queue.change_visibility(receipt, LEASE_SECONDS)
+    extend()                       <span style="color:#6e7c8c;"># up front, not after one interval</span>
+    while not done:
+        sleep(HEARTBEAT_INTERVAL)
+        extend()</pre>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">Reaping the dead so the living can run</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Workers die mid-job — deploys, OOMs, cancellations — and leave a job stuck in <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">Running</code> forever. Harmless, until you have a concurrency limiter that <em>counts</em> running jobs to decide whether it can start another. Enough stuck-<code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">Running</code> orphans and the limiter thinks it's permanently at capacity: the whole dispatcher deadlocks and nothing new ever starts.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The cure is a reaper that runs <em>before</em> the capacity check, fails any job whose last heartbeat/update is older than a generous ceiling (marked failed with a reason, <strong style="font-weight:600;">not</strong> deleted — keep the audit trail), and then invalidates whatever cached count the limiter reads. Reap and un-throttle on the same pass, or the freed slot stays invisible until the next cycle.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">The shape, end to end</h2>
+
+    <div style="background:#ffffff;border:1px solid #DCE2EA;border-radius:16px;padding:24px 22px;margin:0 0 30px;">
+    <div class="mermaid-target"></div>
+    </div>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">What to steal from this</h2>
+
+    <ul style="list-style:none;padding:0;margin:0 0 26px;">
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">Anything that can outlive a load-balancer idle timeout should be submit-and-poll.</strong> <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">202</code> + a status endpoint beats a held connection. A held request doesn't remove the failure; it relocates it somewhere worse.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">When a message won't route, change the channel, not the messenger.</strong> Deliver over infrastructure the producer already reaches. My locked-down worker couldn't make the HTTP call — but it could always talk to the queue it was already reading.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">At-least-once means idempotent handlers and a sacred ack.</strong> Duplicate → clean up and ack. Can't process it → don't ack; let redelivery retry. The queue is your retry buffer; acking to silence a message you failed on is how data disappears.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">If you partition by tenant but run workers without a tenant, put the tenant in the message</strong> — on submit <em>and</em> every re-enqueue — or you'll chase ghosts in a partition nobody queries.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:0;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">If a limiter counts in-flight work, reap the dead before you count</strong> — and invalidate the cache the limiter reads, or a handful of zombies will deadlock everything.</li>
+    </ul>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The meta-lesson I keep coming back to: I spent real effort making a callback <em>authenticate</em> before I checked whether it could even <em>arrive</em>. Verify the road exists before you pave it.</p>
+
+    <footer style="padding-top:64px;margin-top:56px;border-top:1px solid #E1E5EB;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;">
+      <a href="/writing" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#68809a;text-decoration:none;">← all writing</a>
+      <div style="display:flex;gap:20px;font-family:'JetBrains Mono',monospace;font-size:13px;">
+        <a href="https://github.com/Kushagra1480" target="_blank" style="text-decoration:none;">GitHub</a>
+        <a href="https://linkedin.com/in/kushagra-kartik" target="_blank" style="text-decoration:none;">LinkedIn</a>
+      </div>
+    </footer>
+
+  </article>

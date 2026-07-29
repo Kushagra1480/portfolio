@@ -1,0 +1,137 @@
+<article style="max-width:680px;margin:0 auto;transition:opacity 0.34s ease,transform 0.42s cubic-bezier(0.4,0,0.2,1);" data-page="1">
+
+    <header style="margin:0 0 56px;">
+      <a href="/writing" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#68809a;text-decoration:none;display:inline-block;margin:28px 0 24px;">← writing</a>
+      <div style="position:relative;width:100%;aspect-ratio:16/9;border-radius:16px;overflow:hidden;background:#1B3A5C;box-shadow:0 30px 70px -34px rgba(20,32,48,0.5);">
+        <img src="/images/broker.png" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" />
+        <div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,18,30,0.15) 0%, rgba(10,18,30,0.12) 42%, rgba(10,18,30,0.72) 100%);"></div>
+        <div style="position:absolute;left:0;right:0;bottom:0;padding:36px 38px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.82);margin-bottom:16px;">Security · Multi-tenancy</div>
+          <h1 style="font-size:44px;line-height:1.08;font-weight:500;letter-spacing:-0.02em;margin:0;color:#FFFFFF;text-wrap:pretty;text-shadow:0 2px 24px rgba(8,14,24,0.45);">A token broker that let my sandbox call APIs it could never authenticate to</h1>
+        </div>
+      </div>
+    </header>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">I built a sandbox that runs an autonomous coding agent — it writes Python, executes it, hits a data warehouse, and builds a report, all from a prompt. That is untrusted code execution by definition: a prompt-injected or buggy agent can run whatever the sandbox can run.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The problem that ate a week of my life wasn't the sandbox boundary itself. It was this: the agent needs <em>live results</em> from a customer's third-party API — think a Salesforce or a data-warehouse connection — but it must never hold that connection's credential. If the sandbox can read the secret, a compromised sandbox can exfiltrate it, and the blast radius of one bad run becomes one customer's entire data platform.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">This is a surprisingly common shape once you look for it: an LLM tool, a CI runner, a plugin, any workload you don't fully trust that nonetheless needs real data from a credentialed API. The clean answer is a <strong style="font-weight:600;">credential broker</strong>, and getting the identity model right is the part everyone gets wrong the first time.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">The trap: the API you already have trusts a header</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Most platforms already have an internal RPC that makes the outbound call server-side. In my case there was a service — call it <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">Invoke</code> — that took a connection ID, a method, a path, and params, ran the real API call with a server-held secret, and returned the data. The secret already lived on the right side of the boundary. So the tempting move is obvious: just let the sandbox call <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">Invoke</code>.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Don't. Look at how that service decides <em>who you are.</em> Mine authorized on a single header — a tenant ID header — and trusted it completely. That's fine in normal operation, because a session gateway upstream is the only thing that sets it, and nothing past the gateway can forge it.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">But the sandbox isn't past the gateway. It's untrusted and it sits outside the session. Hand it direct access to <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">Invoke</code> and <em>anything it can write into a header, it can claim to be.</em> Set the tenant header to someone else's tenant and you are someone else. Tenant impersonation, free of charge.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 22px;text-wrap:pretty;">That gave me two non-negotiable constraints:</p>
+
+    <ol style="padding-left:22px;margin:0 0 26px;font-size:19px;line-height:1.6;color:#1f2731;">
+      <li style="margin-bottom:14px;padding-left:6px;text-wrap:pretty;">The sandbox's channel must derive the tenant from <strong style="font-weight:600;">something it cannot forge</strong>, never a request header.</li>
+      <li style="padding-left:6px;text-wrap:pretty;">The sandbox must <strong style="font-weight:600;">never hold the credential.</strong></li>
+    </ol>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">The pattern: one thing holds the secrets so nothing else does</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">This is the same principle underneath OAuth. The caller never touches the provider's real secret; instead a broker holds it, injects it into the outbound call, and returns only the response. Secrets never cross the trust boundary, and rotation, revocation, and audit all collapse into one place.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The twist for an untrusted sandbox is: how does the sandbox authenticate <em>to the broker</em>? It can't hold the provider secret — but it needs to prove "I'm allowed to ask you to call this API for tenant X." So you give it a short-lived, unforgeable token that encodes exactly that, and — this is the whole trick — <strong style="font-weight:600;">the broker enforces the tenant from the token, not from the request.</strong></p>
+
+    <div style="background:#ffffff;border:1px solid #DCE2EA;border-radius:16px;padding:24px 22px;margin:0 0 30px;">
+    <div class="mermaid-target"></div>
+    </div>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The request the sandbox sends carries a connection ID, a method, a path, params — and <strong style="font-weight:600;">no tenant, no credential.</strong> There's deliberately nowhere to put a tenant, because tenant isn't the caller's to assert.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">The token, and the three guards that matter</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">A trusted, privileged process mints a per-job JWT at startup, bound to the tenant and the job, with a bounded lifetime. It's signed with a symmetric key (HS256) that the sandbox never sees.</p>
+
+    <pre style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#e4e8ee;background:#161a20;border:1px solid #2a2f38;border-radius:12px;padding:22px 22px;overflow-x:auto;margin:0 0 30px;">const <span>defaultTTL</span> = 2 * time.Hour
+
+type Claims struct {
+    JobID    string `json:"job_id"`
+    TenantID string `json:"tenant_id"`
+    jwt.RegisteredClaims
+}
+
+func Verify(key []byte, tokenStr string) (*Claims, error) {
+    claims := &amp;Claims{}
+    _, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) {
+        <span style="color:#6e7c8c;">// Alg-confusion guard: reject anything that isn't the HMAC we signed with.
+        // Without this you're open to alg:none and RS→HS downgrade attacks.</span>
+        if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+            return nil, fmt.Errorf(<span style="color:#9ec2e6;">"unexpected signing method: %v"</span>, t.Header[<span style="color:#9ec2e6;">"alg"</span>])
+        }
+        return key, nil
+    },
+        jwt.WithIssuer(tokenIssuer),  <span style="color:#6e7c8c;">// issuer pin</span>
+        jwt.WithExpirationRequired(), <span style="color:#6e7c8c;">// no exp = not a valid token</span>
+    )
+    if err != nil {
+        return nil, err
+    }
+    if claims.TenantID == <span style="color:#9ec2e6;">""</span> {
+        return nil, errors.New(<span style="color:#9ec2e6;">"token missing tenant"</span>)
+    }
+    return claims, nil
+}</pre>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 22px;text-wrap:pretty;">Verify a JWT like it's hostile, because in this design it literally arrives from your least-trusted component:</p>
+
+    <ul style="list-style:none;padding:0;margin:0 0 26px;">
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">Alg-confusion guard.</strong> Reject any signing method that isn't the exact one you minted with. If your verify callback returns the key without checking <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">t.Method</code>, an attacker can present an <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">alg: none</code> token or flip your verifier into treating a public key as an HMAC secret. This is the single most common JWT vulnerability in the wild.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">Issuer pin + required expiry.</strong> A token from another issuer isn't yours; a token with no expiry never dies. Reject both structurally.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:0;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">Non-empty tenant.</strong> The tenant claim is the entire security decision — a token that verifies but has no tenant is malformed, not "empty is fine."</li>
+    </ul>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The short TTL (I used two hours) is intentional blast-radius control. Even if a token somehow escaped the sandbox, it's a <em>coarse</em> capability — "ask the broker to call this tenant's connections" — that expires on its own, can't be refreshed from inside the sandbox, and never exposes the underlying provider secret.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">The one line that carries the whole design</h2>
+
+    <pre style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#e4e8ee;background:#161a20;border:1px solid #2a2f38;border-radius:12px;padding:22px 22px;overflow-x:auto;margin:0 0 30px;"><span style="color:#6e7c8c;">// Authenticate to the broker: the Bearer token *is* the auth.</span>
+claims, err := verifyToken(req.Header().Get(<span style="color:#9ec2e6;">"Authorization"</span>))
+if err != nil {
+    return unauthenticated(err)
+}
+
+<span style="color:#6e7c8c;">// Stamp the tenant FROM THE TOKEN. Any tenant header the caller set is ignored.</span>
+inner := buildRealRequest(req.Msg)         <span style="color:#6e7c8c;">// connection_id, method, path, params</span>
+inner.SetTenant(claims.TenantID)           <span style="color:#6e7c8c;">// &lt;-- not the caller's header</span>
+
+<span style="color:#6e7c8c;">// Run the real API call server-side, with the credential the sandbox never sees.</span>
+return realInvoke(ctx, inner)</pre>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">inner.SetTenant(claims.TenantID)</code> is the line the whole thing rests on. A header is an <em>assertion</em> the caller controls; a verified claim is a <em>fact</em>. If you ever find yourself reading the tenant off the incoming request in a broker like this, stop — that's the impersonation hole reopening.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">Why cross-tenant access becomes structurally safe</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Here's the part I like most, because it's safe by <em>absence</em> rather than by vigilance. The real API call looks up the connection scoped to the tenant — effectively <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">store.Get(tenant, connection_id)</code> — and the tenant comes from the verified token. So if the sandbox passes a connection ID belonging to a different customer, the lookup just returns <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">NotFound</code>.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">There is no cross-tenant code path to review, no allow-list to keep in sync, no "did we remember to filter here?" The foreign connection is simply invisible, because every query is scoped to a tenant the caller can't forge. Absence of a code path beats a correct code path every time.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">What I'd change</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">My token is <strong style="font-weight:600;">tenant-scoped, not per-capability-scoped</strong> — the sandbox can call <em>any</em> connection its tenant owns, not just the specific ones a given job needs. The tenant boundary was the load-bearing one, so I shipped that and deferred connector-level scoping. If I did it again I'd put the allow-list right into the token claims from the start: it's nearly free at mint time and turns "least privilege" from an aspiration into a property.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">What to steal from this</h2>
+
+    <ul style="list-style:none;padding:0;margin:0 0 26px;">
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span>Untrusted code that needs <em>results</em> from a credentialed API should never receive the credential. Front it with a broker that holds the secret and hand the caller only a coarse token that says "you may ask."</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">Identity comes from the token's claims, never from a header the caller can set.</strong> The most dangerous line in the system is the one that decides the tenant — make sure it reads the verified token.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span>Design so cross-tenant access is <em>structurally</em> impossible: scope every lookup to the token's tenant, so a foreign ID returns <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">NotFound</code> with no special-case code at all.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span>Treat every JWT as hostile: pin the signing method, pin the issuer, require expiry, reject empty required claims.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:0;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span>Keep the token short-lived and wipe it from any record the instant the work finishes. A short coarse capability is a contained fire; a long-lived secret is a house burning down.</li>
+    </ul>
+
+    <footer style="padding-top:64px;margin-top:56px;border-top:1px solid #E1E5EB;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;">
+      <a href="/writing" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#68809a;text-decoration:none;">← all writing</a>
+      <div style="display:flex;gap:20px;font-family:'JetBrains Mono',monospace;font-size:13px;">
+        <a href="https://github.com/Kushagra1480" target="_blank" style="text-decoration:none;">GitHub</a>
+        <a href="https://linkedin.com/in/kushagra-kartik" target="_blank" style="text-decoration:none;">LinkedIn</a>
+      </div>
+    </footer>
+
+  </article>

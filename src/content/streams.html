@@ -1,0 +1,170 @@
+<article style="max-width:680px;margin:0 auto;transition:opacity 0.34s ease,transform 0.42s cubic-bezier(0.4,0,0.2,1);" data-page="1">
+
+    <header style="margin:0 0 56px;">
+      <a href="/writing" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#68809a;text-decoration:none;display:inline-block;margin:28px 0 24px;">← writing</a>
+      <div style="position:relative;width:100%;aspect-ratio:16/9;border-radius:16px;overflow:hidden;background:#1B3A5C;box-shadow:0 30px 70px -34px rgba(20,32,48,0.5);">
+        <img src="/images/streams.webp" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" />
+        <div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,18,30,0.15) 0%, rgba(10,18,30,0.12) 42%, rgba(10,18,30,0.72) 100%);"></div>
+        <div style="position:absolute;left:0;right:0;bottom:0;padding:36px 38px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.82);margin-bottom:16px;">Streaming · Go</div>
+          <h1 style="font-size:44px;line-height:1.08;font-weight:500;letter-spacing:-0.02em;margin:0;color:#FFFFFF;text-wrap:pretty;text-shadow:0 2px 24px rgba(8,14,24,0.45);">Why my LLM stream died at exactly 45 seconds — and why I eventually stopped streaming</h1>
+        </div>
+      </div>
+    </header>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">I spent a good chunk of a year building the streaming layer for an LLM app — the part that pushes tokens and progress from a Go backend to a browser while a model thinks. I went in believing Server-Sent Events were obviously correct for the job. I still think they're the right <em>shape</em>. But two production bugs rearranged my priorities, and the second one ended with me deleting the streaming code and shipping a polling loop instead. Here's the whole story, because the lessons transfer to any long-lived HTTP stream.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">Pick the right transport for the shape of your data</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">When you're pushing model output to a browser, the data flow is one-directional: server → client, token after token, plus the occasional progress event. You are not having a conversation over the wire in both directions at once. That shape has a natural fit.</p>
+
+    <div style="overflow-x:auto;margin:0 0 30px;border:1px solid #DCE2EA;border-radius:12px;">
+      <table style="border-collapse:collapse;width:100%;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.5;color:#1f2731;">
+        <thead>
+          <tr style="background:#EAEEF4;text-align:left;">
+            <th style="padding:12px 14px;font-weight:500;border-bottom:1px solid #DCE2EA;">Transport</th>
+            <th style="padding:12px 14px;font-weight:500;border-bottom:1px solid #DCE2EA;">Direction</th>
+            <th style="padding:12px 14px;font-weight:500;border-bottom:1px solid #DCE2EA;">Protocol</th>
+            <th style="padding:12px 14px;font-weight:500;border-bottom:1px solid #DCE2EA;">Reconnect</th>
+            <th style="padding:12px 14px;font-weight:500;border-bottom:1px solid #DCE2EA;">Good for</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">Long-poll</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">request/response</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">HTTP</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">manual</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">occasional updates</td>
+          </tr>
+          <tr style="background:#faf6f0;">
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;font-weight:500;color:#111111;">SSE</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">server → client</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">HTTP</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;"><strong style="font-weight:600;">built-in</strong> (Last-Event-ID)</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">token streams, progress, logs</td>
+          </tr>
+          <tr>
+            <td style="padding:12px 14px;">WebSocket</td>
+            <td style="padding:12px 14px;">full-duplex</td>
+            <td style="padding:12px 14px;">ws:// upgrade</td>
+            <td style="padding:12px 14px;">manual</td>
+            <td style="padding:12px 14px;">chat, games, bidirectional</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">WebSocket is full-duplex and a <em>different protocol</em> with an upgrade handshake, its own load-balancer headaches, and no built-in reconnect or framing — everything you'd hand-roll. SSE is just an HTTP GET whose body never ends: <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">Content-Type: text/event-stream</code>, write UTF-8 events, flush after each one. The browser consumes it with <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">EventSource</code>, which gives you automatic reconnection and event IDs for free. For one-directional streaming, it's the least machinery. So I used it.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">The 45-second guillotine</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The bug reported itself with unnerving precision: only long, tool-heavy requests failed, always at about 45 seconds, always with <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">context canceled</code> in the logs — never <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">deadline exceeded</code>.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">That one-word difference was the whole investigation. <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">context canceled</code> means something <em>upstream</em> killed my request's context. <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">deadline exceeded</code> would mean my own timeout fired. My app-level timeout was five minutes, so this wasn't me. Something external was cancelling the request at 45 seconds flat.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">It was Go's <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">http.Server.WriteTimeout</code>, and it's a trap because it doesn't mean what it sounds like:</p>
+
+    <pre style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#e4e8ee;background:#161a20;border:1px solid #2a2f38;border-radius:12px;padding:22px 22px;overflow-x:auto;margin:0 0 30px;">srv := &amp;http.Server{
+    ReadTimeout: 10 * time.Second,
+    <span style="color:#6e7c8c;">// Resets on activity, only covers idle time BETWEEN requests. Not the bug.</span>
+    IdleTimeout: 120 * time.Second,
+    <span style="color:#6e7c8c;">// A whole-response, wall-clock cap. Starts when the request is read and
+    // does NOT reset when you write. For a stream, it's a fuse on a timer.</span>
+    WriteTimeout: 45 * time.Second,
+}</pre>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">WriteTimeout</code> is not "abort if one write blocks." It's a fixed budget for the <em>entire</em> response, and it does <strong style="font-weight:600;">not</strong> reset when you flush bytes. <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">IdleTimeout</code> is the one that resets on activity — and it only governs idle keep-alive between requests, not a response in flight. For a normal handler that returns in milliseconds you'll never notice. For a stream meant to live for minutes, <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">WriteTimeout</code> chops it off at the deadline regardless of how much data is actively flowing.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">When it fired, the server cancelled the request context, and that cancellation cascaded down through every layer that had derived a context from it — the stream loop, the model client, the in-flight read of the model's event stream — all of them unwound at once. <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">context canceled</code>, not <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">deadline exceeded</code>. Exactly consistent with a parent cancel.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">The fix is per-handler, not global</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The tempting fix is to raise the global <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">WriteTimeout</code> to something huge. Don't — that removes the protection from every ordinary route to rescue a couple of streaming ones. Since Go 1.20 there's a targeted tool: <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">http.ResponseController</code> reaches the underlying connection so you can clear the deadline for just the response you're serving.</p>
+
+    <pre style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#e4e8ee;background:#161a20;border:1px solid #2a2f38;border-radius:12px;padding:22px 22px;overflow-x:auto;margin:0 0 30px;">func streamHandler(w http.ResponseWriter, r *http.Request) {
+    flusher, ok := w.(http.Flusher)
+    if !ok {
+        http.Error(w, <span style="color:#9ec2e6;">"streaming unsupported"</span>, http.StatusInternalServerError)
+        return
+    }
+
+    <span style="color:#6e7c8c;">// Clear the write deadline for THIS response only. The zero time means
+    // "no deadline." WriteTimeout never resets on writes, so leaving it set
+    // guillotines any stream that outlives it.</span>
+    rc := http.NewResponseController(w)
+    if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+        log.Printf(<span style="color:#9ec2e6;">"could not clear write deadline: %v"</span>, err) <span style="color:#6e7c8c;">// best-effort</span>
+    }
+
+    w.Header().Set(<span style="color:#9ec2e6;">"Content-Type"</span>, <span style="color:#9ec2e6;">"text/event-stream"</span>)
+    w.Header().Set(<span style="color:#9ec2e6;">"Cache-Control"</span>, <span style="color:#9ec2e6;">"no-cache"</span>)
+    w.Header().Set(<span style="color:#9ec2e6;">"X-Accel-Buffering"</span>, <span style="color:#9ec2e6;">"no"</span>) <span style="color:#6e7c8c;">// don't let the reverse proxy buffer us</span>
+    w.WriteHeader(http.StatusOK)
+
+    ctx := r.Context()
+    tick := time.NewTicker(15 * time.Second)
+    defer tick.Stop()
+
+    for {
+        select {
+        case &lt;-ctx.Done():
+            return
+        case &lt;-tick.C:
+            fmt.Fprint(w, <span style="color:#9ec2e6;">": ping\n\n"</span>) <span style="color:#6e7c8c;">// heartbeat comment; keeps bytes moving</span>
+            flusher.Flush()
+        case tok, open := &lt;-tokens:
+            if !open {
+                return
+            }
+            fmt.Fprintf(w, <span style="color:#9ec2e6;">"data: %s\n\n"</span>, tok)
+            flusher.Flush()
+        }
+    }
+}</pre>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">One gotcha: <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">ResponseController</code> can only clear the deadline if it can <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">Unwrap()</code> its way down to the real connection. Most routers wrap <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">ResponseWriter</code>; the good ones implement <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">Unwrap()</code> so the controller walks the chain. If yours doesn't, you get <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">ErrNotSupported</code> back — which is why I <em>check the error</em> instead of assuming it worked. After the fix, liveness was still bounded by the right things: my five-minute application context and the heartbeat, not a transport-layer fuse that has no idea whether a stream is legitimately in progress.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">The harder lesson: EventSource won't tell you the stream died</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">That fixed the token stream. A sibling feature — streaming <em>progress</em> for a multi-minute background job — taught me something that reversed my whole position on streaming.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Through the production proxy chain, the long-lived SSE stream dropped silently a couple of minutes in. I'd built it defensively: stream first, fall back to polling on error. The fallback never fired, and I learned why the hard way:</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><strong style="font-weight:600;"><code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">EventSource</code> does not reliably fire its <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">error</code> event on a half-open drop.</strong> Clean teardown, sure. But when an intermediary quietly stops forwarding bytes while the socket still looks alive, <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">EventSource</code> just sits there — no <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">error</code>, no reconnect, no signal at all. My fallback was waiting on an event that never came, so the UI froze: no progress, no error, no result, even though the job had finished.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">I did the standard hardening first — a 15-second heartbeat so bytes keep flowing under the proxy's idle timeout, <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">X-Accel-Buffering: no</code> so the proxy streams instead of buffering everything into one burst at the end, the right content type. All necessary. None sufficient. The stream still died through that chain.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">So I deleted the streaming client and went <strong style="font-weight:600;">poll-primary</strong>:</p>
+
+    <pre style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#e4e8ee;background:#161a20;border:1px solid #2a2f38;border-radius:12px;padding:22px 22px;overflow-x:auto;margin:0 0 30px;">async function pollJob(id, onProgress, signal) {
+  while (!signal.aborted) {
+    const res = await fetch(`/api/jobs/${id}`);
+    const job = await res.json();
+    if (job.progress) onProgress(job.progress); <span style="color:#6e7c8c;">// each poll advances the step list</span>
+    if (job.state === <span style="color:#9ec2e6;">"done"</span>)  return job.result;
+    if (job.state === <span style="color:#9ec2e6;">"error"</span>) throw new Error(job.error);
+    await new Promise(r =&gt; setTimeout(r, 2000));
+  }
+}</pre>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The move that kept it feeling live: the status endpoint returns the latest progress event on every poll, and both the old stream and the new poll feed the <em>same monotonic step reducer</em> — so progress only ever moves forward, and a 2-second poll advances the visible steps just fine. Polling has no long-lived connection, so there's nothing to half-drop and no phantom-error to wait on. Through a proxy chain that buffers and silently kills long responses, the boring transport was simply the reliable one.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">What to steal from this</h2>
+
+    <ul style="list-style:none;padding:0;margin:0 0 26px;">
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">Learn your server's timeouts precisely.</strong> In Go, <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">WriteTimeout</code> is a whole-response wall-clock cap that never resets on writes; <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">IdleTimeout</code> is the one that resets, and it only covers idle time between requests. For streaming handlers, clear the write deadline per handler with <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">http.NewResponseController(w).SetWriteDeadline(time.Time{})</code> and keep your real upper bound at the application layer.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;"><code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">context canceled</code> ≠ <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">deadline exceeded</code>.</strong> Canceled means a parent killed you; exceeded means your own timer fired. Reading which one you got tells you where to look before you open a single file.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">Never build a fallback that depends on <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">EventSource.onerror</code>.</strong> It may not fire on a half-drop. If "fall back on error" is your reliability story, it has a hole; add a heartbeat and an independent liveness timer, or don't rely on the fallback.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:0;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">SSE is the right shape for one-way streaming, but the transport has to survive your real network.</strong> Set <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">X-Accel-Buffering: no</code>, send heartbeats — and if a proxy chain still buffers or silently kills the stream, make polling primary and fold both paths onto one monotonic progress model. Sometimes the least impressive transport is the one that actually works.</li>
+    </ul>
+
+    <footer style="padding-top:64px;margin-top:56px;border-top:1px solid #E1E5EB;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;">
+      <a href="/writing" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#68809a;text-decoration:none;">← all writing</a>
+      <div style="display:flex;gap:20px;font-family:'JetBrains Mono',monospace;font-size:13px;">
+        <a href="https://github.com/Kushagra1480" target="_blank" style="text-decoration:none;">GitHub</a>
+        <a href="https://linkedin.com/in/kushagra-kartik" target="_blank" style="text-decoration:none;">LinkedIn</a>
+      </div>
+    </footer>
+
+  </article>

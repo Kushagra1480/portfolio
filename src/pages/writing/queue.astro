@@ -1,0 +1,29 @@
+---
+import Article from '../../layouts/Article.astro';
+import body from '../../content/queue.html?raw';
+const mermaid = [
+  'sequenceDiagram',
+  '    participant UI as Client',
+  '    participant API as API',
+  '    participant Q as Work queue',
+  '    participant W as Worker',
+  '    participant R as Sandbox runner',
+  '    participant P as Backstop poller',
+  '    UI->>API: submit',
+  '    API->>Q: enqueue (job_id, tenant_id)',
+  '    API-->>UI: 202 (job_id)',
+  '    Note over UI,API: async, survives LB idle timeout',
+  '    W->>Q: long-poll, lease starts',
+  '    W->>R: dispatch',
+  '    Note over R: runs minutes, heartbeat extends lease',
+  '    R->>Q: enqueue completion, output_ref',
+  '    Note right of R: queue is the one open channel back',
+  '    W->>Q: receive completion',
+  '    W->>W: load job, retry on read-after-write miss',
+  '    W->>W: mark done (idempotent), ack',
+  '    UI->>API: poll GET job_id',
+  '    API-->>UI: result when terminal',
+  '    Note over P: poller completes from output store',
+].join('\n');
+---
+<Article title="The queue was the answer the whole time" body={body} mermaid={mermaid} />

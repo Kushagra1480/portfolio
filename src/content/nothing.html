@@ -1,0 +1,121 @@
+<article style="max-width:680px;margin:0 auto;transition:opacity 0.34s ease,transform 0.42s cubic-bezier(0.4,0,0.2,1);" data-page="1">
+
+    <header style="margin:0 0 56px;">
+      <a href="/writing" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#68809a;text-decoration:none;display:inline-block;margin:28px 0 24px;">← writing</a>
+      <div style="position:relative;width:100%;aspect-ratio:16/9;border-radius:16px;overflow:hidden;background:#1B3A5C;box-shadow:0 30px 70px -34px rgba(20,32,48,0.5);">
+        <img src="/images/nothing.webp" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" />
+        <div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,18,30,0.15) 0%, rgba(10,18,30,0.12) 42%, rgba(10,18,30,0.72) 100%);"></div>
+        <div style="position:absolute;left:0;right:0;bottom:0;padding:36px 38px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.82);margin-bottom:16px;">Debugging · Silent failures</div>
+          <h1 style="font-size:44px;line-height:1.08;font-weight:500;letter-spacing:-0.02em;margin:0;color:#FFFFFF;text-wrap:pretty;text-shadow:0 2px 24px rgba(8,14,24,0.45);">The feature was built. It just didn't do anything.</h1>
+        </div>
+      </div>
+    </header>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The worst bugs I've hit weren't the ones that crashed. Crashes are honest — they page you, they leave a stack trace, they demand attention. The worst ones were features I'd <em>finished</em>: written, reviewed, merged, deployed. The system reported success. The dashboard stayed green. And the thing the feature existed to do simply never happened.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">I've collected a few of these across different jobs and layers — a full disk, a browser stream, an RPC across a process boundary, a shell-out — and they all rhyme. In every case there was no error to find, because the error had already been made to disappear. Here are four, each as symptom → wrong guess → root cause → fix → lesson. The pattern's at the bottom.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">1. The job that "succeeded" and produced nothing</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">A batch job that generated a large output file started coming back with exit code 0, no error, and no file. Just gone.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">My first guess was the generator itself — some input it couldn't handle. I went input-diffing. Wrong tree entirely.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">It was a full disk. The job wrote its main output fine, but the <em>next</em> write — a small metadata file — hit <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">ENOSPC</code>. And the error handler looked like this:</p>
+
+    <pre style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#e4e8ee;background:#161a20;border:1px solid #2a2f38;border-radius:12px;padding:22px 22px;overflow-x:auto;margin:0 0 30px;">def report_failure(exc):
+    try:
+        write_log(f<span style="color:#9ec2e6;">"failed: {exc}"</span>)   <span style="color:#6e7c8c;"># writes to the full disk...</span>
+        set_status(<span style="color:#9ec2e6;">"failed"</span>)
+    except Exception:
+        pass                          <span style="color:#6e7c8c;"># ...and this eats the second ENOSPC</span>
+
+def main():
+    try:
+        do_work()
+    except Exception as exc:
+        report_failure(exc)           <span style="color:#6e7c8c;"># throws ENOSPC in here, swallowed</span>
+        sys.exit(0)                   <span style="color:#6e7c8c;"># reports success</span></pre>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The failure reporter tried to write to the disk that was full, threw its <em>own</em> <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">ENOSPC</code>, and <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">except: pass</code> swallowed it. The process exited 0 with status stuck at its default. Whatever ran downstream saw "done, no problem" and moved on. A completed job's output, silently discarded.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">(The disk had filled for its own dumb reason — a path pattern that was quietly scooping up every previous run's leftovers into each new run, growing a little each time until it tipped over. But that's a footnote; the <em>cover-up</em> was the real bug.)</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The fix had two layers. Immediately: reorder so the important output is written before any fragile bookkeeping, and give the disk headroom. Properly: stop hoarding old runs' data. But the lesson is narrower and meaner — <strong style="font-weight:600;">a <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">try/except: pass</code> inside the error handler blinds the exact code path that only runs when things are already broken.</strong></p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">2. The stream that was secretly dead</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">A UI had a live progress indicator fed by a long-lived Server-Sent Events stream. The design was "stream first, fall back to polling if the stream errors." Reasonable. The indicator would update for a while, then freeze — while the backend job finished perfectly.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">My first guess: we're not emitting enough events. The events were fine. The stream was dead — it just hadn't told anyone.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Here's the thing about <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">EventSource</code>: a connection that drops <em>mid-stream</em>, especially a half-open TCP connection sitting behind a proxy or load balancer that timed it out, does <strong style="font-weight:600;">not</strong> reliably fire the <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">error</code> handler. To the browser, "the connection quietly stopped delivering bytes" is nearly indistinguishable from "the server is just being quiet right now." So:</p>
+
+    <pre style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#e4e8ee;background:#161a20;border:1px solid #2a2f38;border-radius:12px;padding:22px 22px;overflow-x:auto;margin:0 0 30px;">const es = new EventSource(url);
+es.onmessage = applyProgress;
+es.onerror = () =&gt; fallBackToPolling();  <span style="color:#6e7c8c;">// never fires on a silent half-drop</span></pre>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">onerror</code> never fires → the fallback never triggers → the UI waits forever for the next message on a connection that's already gone. Our whole "poll fallback" existed and had never once run, because the condition it waited for wasn't observable.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The fix: make it <strong style="font-weight:600;">poll-primary</strong>. Polling has no long-lived connection to silently die — you just re-ask on an interval, and a couple seconds of latency is invisible for a coarse progress bar. (Where you genuinely need push, you can fix the transport — sane proxy idle timeouts, a real heartbeat event, and a client watchdog that falls back on <em>stall</em>, not just on <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">error</code>. But default to the design with no silent-failure mode.)</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Lesson: <strong style="font-weight:600;">"detect the failure and fall back" is only as good as your ability to detect the failure.</strong> If the failure is invisible, your fallback is decorative.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">3. The call that no-op'd because it used the wrong transport</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Two services talked across a process boundary through a small broker. One direction's calls — status updates, some control messages — produced nothing at all. And yet the <em>main</em> work still completed, which made it look flaky and intermittent and maddening.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">My first guess: the broker's racy. I went looking for a concurrency bug in the broker. There wasn't one.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The client picked its transport from an environment variable holding a socket path. In one deployment that var was set and everything worked. In another — a more isolated runtime — the var was <strong style="font-weight:600;">unset</strong>, and the client did this:</p>
+
+    <pre style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#e4e8ee;background:#161a20;border:1px solid #2a2f38;border-radius:12px;padding:22px 22px;overflow-x:auto;margin:0 0 30px;">def call_broker(tool, payload):
+    sock_path = os.environ.get(<span style="color:#9ec2e6;">"BROKER_SOCKET"</span>, <span style="color:#9ec2e6;">""</span>)
+    if sock_path:
+        return unix_call(sock_path, tool, payload)
+    <span style="color:#6e7c8c;"># no else — falls through and returns None</span></pre>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Empty path → skip the call → return nothing. Every call in that environment was a silent no-op. The tell, once I knew to look: the broker logged that it <em>started</em> every run but recorded <strong style="font-weight:600;">zero</strong> incoming requests. Not some — zero. The main work still finished only because it went over a <em>different</em> channel; the broker-dependent stuff was the only thing that was 100% dead, and it happened to be the least visible.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The fix was to add the other transport branch and use it when the socket path is empty — connect over the runtime's actual control channel instead of falling through.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Lesson: <strong style="font-weight:600;">an <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">if configured: do it</code> with no <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">else</code> is a silent no-op waiting for a new environment.</strong> If a call is mandatory somewhere, make its <em>absence</em> loud — throw, or at minimum log — don't quietly skip it.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">4. The shell-out that returned empty on the server but worked by hand</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">A service shelled out to a command, parsed the output, and used it. On the server it kept coming back empty. SSH in, run the identical command by hand: works instantly, prints exactly what's expected.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">My first guess: timing — the thing it was looking for wasn't ready yet. It was ready the whole time.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The code captured only stdout and treated any problem as an empty result:</p>
+
+    <pre style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#e4e8ee;background:#161a20;border:1px solid #2a2f38;border-radius:12px;padding:22px 22px;overflow-x:auto;margin:0 0 30px;">out = subprocess.run(cmd, capture_output=True).stdout.decode()
+return parse(out)   <span style="color:#6e7c8c;"># "" whether the command errored or genuinely matched nothing</span></pre>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">So "the command failed" and "the command ran fine and found nothing" collapsed into the same empty string — and they need opposite responses. The moment I captured stderr and split them into two distinct log lines — one for a <strong style="font-weight:600;">non-zero exit</strong> (with stderr), one for a <strong style="font-weight:600;">clean run with no match</strong> — the answer was right there. It was an environment difference between the service's process and my interactive shell: a <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">PATH</code>/permissions delta, not a missing target. Invisible as long as errors and empty-results looked identical.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Lesson: <strong style="font-weight:600;">when a shell-out returns empty, capture stderr first, and never let "it errored" and "it succeeded with nothing" be the same value.</strong></p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">What to steal from this</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Four layers, one disease: <em>successful nothing.</em> The transferable rules:</p>
+
+    <ul style="list-style:none;padding:0;margin:0 0 26px;">
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">Never let a catch-all eat an error — least of all in the error handler.</strong> <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">except: pass</code> (and its cousins in every language) around your reporting path is how a disk-full turns into a green checkmark. The code that runs when things break should be the <em>most</em> observable code you own.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;"><code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">exit 0</code> is a claim, not a fact.</strong> Verify the artifact — the file exists, the row landed, the event arrived — not the return value. Every one of these bugs passed its exit-code check.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">Prefer failure modes you can see.</strong> A stream that silently half-drops, an env-gated call that falls through, a shell-out that returns <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">""</code> on error: all "successful nothing." Given a choice, pick the design whose failure is loud — poll instead of a droppable stream, throw instead of fall through, two log lines instead of one empty string.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:0;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">Don't build fallbacks on signals you can't trust.</strong> Half of these were fallback logic waiting on a signal that never arrived. A fallback is only as good as the failure detection under it.</li>
+    </ul>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Distrust green dashboards. The best question you can ask a "successful" system is a rude one: <em>prove it actually did the thing.</em></p>
+
+    <footer style="padding-top:64px;margin-top:56px;border-top:1px solid #E1E5EB;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;">
+      <a href="/writing" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#68809a;text-decoration:none;">← all writing</a>
+      <div style="display:flex;gap:20px;font-family:'JetBrains Mono',monospace;font-size:13px;">
+        <a href="https://github.com/Kushagra1480" target="_blank" style="text-decoration:none;">GitHub</a>
+        <a href="https://linkedin.com/in/kushagra-kartik" target="_blank" style="text-decoration:none;">LinkedIn</a>
+      </div>
+    </footer>
+
+  </article>

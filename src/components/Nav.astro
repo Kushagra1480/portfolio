@@ -1,0 +1,81 @@
+---
+const items = [
+  { id: 'home', label: 'home', href: '/' },
+  { id: 'projects', label: 'projects', href: '/projects' },
+  { id: 'writing', label: 'writing', href: '/writing' },
+];
+---
+<nav class="site-nav" id="site-nav" transition:persist>
+  {items.map((n) => (
+    <a class="nav-item" data-id={n.id} href={n.href}>
+      <span class="nav-box"></span><span class="nav-label">{n.label}</span>
+    </a>
+  ))}
+</nav>
+
+<script is:inline>
+  (function () {
+    const ORDER = ['home', 'projects', 'writing'];
+    const HREF = { home: '/', projects: '/projects', writing: '/writing' };
+
+    function currentId() {
+      const p = location.pathname;
+      if (p.startsWith('/writing')) return 'writing';
+      if (p.startsWith('/projects')) return 'projects';
+      return 'home';
+    }
+
+    function paint(animateIn) {
+      const nav = document.getElementById('site-nav');
+      if (!nav) return;
+      const active = currentId();
+      nav.querySelectorAll('.nav-item').forEach((a) => {
+        const box = a.querySelector('.nav-box');
+        const on = a.dataset.id === active;
+        a.classList.toggle('is-active', on);
+        if (on) {
+          if (animateIn) {
+            box.style.animation = 'none';
+            void box.offsetWidth;
+            box.style.animation = 'navBoxIn 0.42s cubic-bezier(0.16,1,0.3,1) forwards';
+          }
+        } else {
+          box.style.animation = '';
+        }
+      });
+    }
+
+    // Slide the leaving section's box out before the swap.
+    document.addEventListener('astro:before-swap', () => {
+      const nav = document.getElementById('site-nav');
+      if (!nav) return;
+      const a = nav.querySelector('.nav-item[data-id="' + currentId() + '"]');
+      if (a) {
+        const box = a.querySelector('.nav-box');
+        box.style.animation = 'navBoxOut 0.24s cubic-bezier(0.5,0,0.75,0) forwards';
+      }
+    });
+
+    document.addEventListener('astro:page-load', () => paint(true));
+
+    if (!window.__navKeys) {
+      window.__navKeys = true;
+      window.addEventListener('keydown', (e) => {
+        if (!e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+        const k = e.key.toLowerCase();
+        if (k !== 'w' && k !== 's') return;
+        const t = e.target;
+        if (t && (t.isContentEditable || /^(input|textarea|select)$/i.test(t.tagName))) return;
+        e.preventDefault();
+        let i = ORDER.indexOf(currentId());
+        if (i < 0) i = ORDER.length - 1;
+        i = (i + (k === 'w' ? -1 : 1) + ORDER.length) % ORDER.length;
+        const dest = HREF[ORDER[i]];
+        if (window.__astroNavigate) window.__astroNavigate(dest);
+        else location.href = dest;
+      });
+    }
+
+    paint(false);
+  })();
+</script>

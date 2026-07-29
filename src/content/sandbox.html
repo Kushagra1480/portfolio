@@ -1,0 +1,141 @@
+<article style="max-width:680px;margin:0 auto;transition:opacity 0.34s ease,transform 0.42s cubic-bezier(0.4,0,0.2,1);" data-page="1">
+
+    <header style="margin:0 0 56px;">
+      <a href="/writing" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#68809a;text-decoration:none;display:inline-block;margin:28px 0 24px;">← writing</a>
+      <div style="position:relative;width:100%;aspect-ratio:16/9;border-radius:16px;overflow:hidden;background:#1B3A5C;box-shadow:0 30px 70px -34px rgba(20,32,48,0.5);">
+        <img src="/images/sandbox.png" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" />
+        <div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(10,18,30,0.15) 0%, rgba(10,18,30,0.12) 42%, rgba(10,18,30,0.72) 100%);"></div>
+        <div style="position:absolute;left:0;right:0;bottom:0;padding:36px 38px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.82);margin-bottom:16px;">Sandboxing · microVMs</div>
+          <h1 style="font-size:44px;line-height:1.08;font-weight:500;letter-spacing:-0.02em;margin:0;color:#FFFFFF;text-wrap:pretty;text-shadow:0 2px 24px rgba(8,14,24,0.45);">The LLM wrote the code. Now where do you run it?</h1>
+        </div>
+      </div>
+    </header>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">I spent a good chunk of last year building a sandbox to run code that a language model wrote. Not code a model <em>suggested</em> to a human who reviewed it — code the agent generated and then executed itself, headless, to get a job done: write some Python, hit a data source, render charts, produce a file. Useful. Also, if you say it plainly: <strong style="font-weight:600;">arbitrary attacker-influenced code executing on my infrastructure.</strong></p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">"Attacker-influenced" isn't paranoia. An agent's plan is steered by an LLM, and the LLM's context is full of text nobody on my team wrote — tool output, retrieved documents, user data. Prompt injection is a real, unsolved thing. So I had to assume the code the agent runs could, on a bad day, try to do something hostile, and design for the only question that matters: <strong style="font-weight:600;">when it does, what can it touch?</strong></p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">That question has a spectrum of answers. Picking the wrong point on it is how a "sandbox" becomes a word rather than a boundary.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">The isolation spectrum</h2>
+
+    <div style="overflow-x:auto;margin:0 0 30px;border:1px solid #DCE2EA;border-radius:12px;">
+      <table style="border-collapse:collapse;width:100%;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.5;color:#1f2731;">
+        <thead>
+          <tr style="background:#EAEEF4;text-align:left;">
+            <th style="padding:12px 14px;font-weight:500;border-bottom:1px solid #DCE2EA;"></th>
+            <th style="padding:12px 14px;font-weight:500;border-bottom:1px solid #DCE2EA;">Boot</th>
+            <th style="padding:12px 14px;font-weight:500;border-bottom:1px solid #DCE2EA;">Isolation boundary</th>
+            <th style="padding:12px 14px;font-weight:500;border-bottom:1px solid #DCE2EA;">Overhead</th>
+            <th style="padding:12px 14px;font-weight:500;border-bottom:1px solid #DCE2EA;">Blast radius if hostile</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;font-weight:500;color:#111111;">Container</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">ms</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">Shared host kernel (namespaces, cgroups, seccomp)</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">Tiny</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">The whole host kernel — one priv-esc bug = the host + every neighbor</td>
+          </tr>
+          <tr style="background:#faf6f0;">
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;font-weight:500;color:#111111;">gVisor</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">~100–200 ms</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">User-space kernel intercepting syscalls</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">Small</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">A guarded software kernel + a narrow host syscall set</td>
+          </tr>
+          <tr>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;font-weight:500;color:#111111;">microVM (Firecracker)</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">~125 ms</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;"><strong style="font-weight:600;">Hardware</strong> virtualization via KVM, own guest kernel</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">~few MB</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #E1E5EB;">A tiny virtio device model</td>
+          </tr>
+          <tr style="background:#faf6f0;">
+            <td style="padding:12px 14px;font-weight:500;color:#111111;">Full VM (QEMU)</td>
+            <td style="padding:12px 14px;">seconds</td>
+            <td style="padding:12px 14px;">Hardware via KVM</td>
+            <td style="padding:12px 14px;">Hundreds of MB</td>
+            <td style="padding:12px 14px;">Large legacy device-emulation surface</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><strong style="font-weight:600;">Containers are the default, and for this they're the wrong default.</strong> A container shares the host's kernel; namespaces and cgroups are policy bolted onto a kernel the hostile code is <em>still running against</em>. One kernel local-privilege-escalation bug — and the supply is effectively infinite — promotes "stuck in my cgroup" to "root on a multi-tenant host." For code I wrote and trust, containers are great. For code a model wrote under adversarial influence, a container is a standing bet against the entire kernel CVE stream, and I don't want that bet on my balance sheet.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><strong style="font-weight:600;">gVisor</strong> is a genuine improvement: it runs a user-space kernel that intercepts the guest's syscalls and handles most of them itself, so the real host kernel only sees a small, hardened surface. If your workload has a predictable syscall profile, it's a great pick. My agent runs <em>arbitrary</em> Python, though — an unbounded compatibility and syscall profile, which is exactly the shape gVisor likes least.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><strong style="font-weight:600;">Full VMs</strong> (QEMU) give the hardware boundary but cost seconds of boot and hundreds of MB of device-emulation surface — most of it a headless code runner never touches.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><strong style="font-weight:600;">microVMs</strong> are the sweet spot, and Firecracker is the tool. It's a minimal VM monitor that runs on Linux KVM, so the guest gets its <em>own kernel</em> behind a CPU-enforced virtualization boundary — a compromise inside the guest has to beat silicon, not a syscall filter, to reach the host. And it boots in ~125 ms because it emulates only a handful of devices (virtio block, net, vsock, a serial console, an interrupt controller). No BIOS, no PCI, no USB to attack. A hardware boundary at roughly container speed. For running model-authored code, that's not gold-plating — it's the floor.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">What a microVM actually costs</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">Here's what the isolation pitch leaves out. A container hands you an init system, a populated <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">/dev</code>, a package manager, and users. <strong style="font-weight:600;">A microVM hands you a bare virtual machine and nothing else.</strong> Whatever the workload needs, you build. I paid for the boundary in low-level plumbing, and the bill is itemized.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><strong style="font-weight:600;">You supply the kernel and root filesystem as files, and boot them over a tiny API.</strong> You <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">PUT</code> a kernel image, a root disk, a machine config, and a network interface at a local socket, then start the instance. That's the easy part.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><strong style="font-weight:600;">There's no init and no <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">/dev</code>.</strong> I built the guest root filesystem from scratch — a tiny musl userland — and wrote PID 1 by hand: mount <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">/proc</code>, <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">/sys</code>, <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">/dev</code>, bring up the network, then drop to the workload. A representative gotcha:</p>
+
+    <pre style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#e4e8ee;background:#161a20;border:1px solid #2a2f38;border-radius:12px;padding:22px 22px;overflow-x:auto;margin:0 0 30px;"><span style="color:#6e7c8c;">#!/bin/sh</span>
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs dev /dev
+<span style="color:#6e7c8c;"># mounting devtmpfs just shadowed the /dev/fd symlinks the
+# rootfs shipped, so recreate them AFTER the mount, or
+# &lt;(...) in bash silently breaks:</span>
+ln -sf /proc/self/fd /dev/fd</pre>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">I lost real time to exactly that: bake the <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">/dev/fd</code> symlinks into the image, mount <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">devtmpfs</code>, watch it shadow them with an empty directory, watch process substitution break with a useless error. If you use busybox, you also have to create the applet symlinks yourself or half your commands don't exist on <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">PATH</code>.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><strong style="font-weight:600;">The workload has to run non-root.</strong> The agent runtime I used refuses its headless, don't-stop-to-ask mode as root — and an agent that stops to ask can't run unattended. So the code runs as an unprivileged user. But a from-scratch rootfs has no baselayout for <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">adduser</code> to work with, so I wrote <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">/etc/passwd</code> and <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">/etc/group</code> directly and launched with <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">su -p</code> to preserve the environment.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><strong style="font-weight:600;">No shared filesystem — at all.</strong> Firecracker deliberately omits virtio-fs and 9p, so you can't mount a host directory or object storage into the guest. Data comes in as a block device. So every run I <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">mkfs</code> an ext4 disk, bake the workspace into it, boot with it attached, and read the results back out afterward. And because the host had no spare loop devices, it all had to be loopless:</p>
+
+    <pre style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#e4e8ee;background:#161a20;border:1px solid #2a2f38;border-radius:12px;padding:22px 22px;overflow-x:auto;margin:0 0 30px;"><span style="color:#6e7c8c;"># populate a filesystem image from a directory at
+# creation — no mount:</span>
+mkfs.ext4 -d ./workspace-tree -F work.ext4 12G
+<span style="color:#6e7c8c;"># ... boot the microVM with work.ext4 as a data disk ...
+# read outputs back without ever mounting the image:</span>
+debugfs -R <span style="color:#9ec2e6;">"rdump /out ./results"</span> work.ext4</pre>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">mkfs.ext4 -d</code> to write and <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">debugfs rdump</code> to read is the loopless idiom that unblocked the whole thing.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><strong style="font-weight:600;">Cold start and disk are yours to manage now.</strong> Copying a ~1 GB root filesystem per run was too slow, so I boot a shared base read-only and attach a small scratch disk as a writable overlay via <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">pivot_root</code>. One tuition-worthy trap: the busybox <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">switch_root</code> helper demands the old root be a ramfs and aborts on an ext4 base — the guest exits and the VM just <em>reboots in a few seconds</em>, so the workload silently never runs and you get no error, only a suspiciously fast "success." <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">pivot_root</code> has no such requirement. And an early config bug that dragged stale data into every run filled the disk and surfaced as a <em>clean</em> exit that quietly produced nothing. When you own the whole machine, you own ENOSPC and the confusing non-failures too.</p>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;"><strong style="font-weight:600;">You also need the hardware.</strong> Firecracker needs KVM (<code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">/dev/kvm</code>), and a lot of cloud instances are themselves guests that don't expose the CPU's virtualization extensions — so no <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">/dev/kvm</code>, no microVM. You either pay for bare metal or pick a newer nested-virtualization-capable instance. Nested virt has a small performance tax; for a multi-minute job it's noise.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">The bonus the VM boundary buys: secrets never enter the box</h2>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">A hardware boundary contains a breach, but the best breach is a boring one. So I kept secrets out of the sandbox entirely. The code needs <em>results</em> from a data source, not the credentials to it — so at job start I mint a short-lived, signed, per-job token and put only that inside the guest. When the code needs data, it calls a proxy on the trusted side:</p>
+
+    <pre style="font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;color:#e4e8ee;background:#161a20;border:1px solid #2a2f38;border-radius:12px;padding:22px 22px;overflow-x:auto;margin:0 0 30px;"><span style="color:#6e7c8c;"># inside the sandbox — no data-source creds here, ever</span>
+r = httpx.post(
+    <span style="color:#9ec2e6;">"http://proxy.internal/invoke"</span>,
+    headers={<span style="color:#9ec2e6;">"Authorization"</span>: f<span style="color:#9ec2e6;">"Bearer {os.environ['JOB_TOKEN']}"</span>},
+    json={<span style="color:#9ec2e6;">"source"</span>: <span style="color:#9ec2e6;">"warehouse"</span>, <span style="color:#9ec2e6;">"op"</span>: <span style="color:#9ec2e6;">"query"</span>, <span style="color:#9ec2e6;">"q"</span>: q},
+)</pre>
+
+    <p style="font-size:19px;line-height:1.66;color:#1f2731;margin:0 0 26px;text-wrap:pretty;">The proxy derives <em>who's asking</em> from the signed token — not a header the guest could forge — runs the real query on the trusted side, and returns only rows. A full compromise of the sandbox nets an attacker some already-authorized results and a token that expires in minutes. Nothing durable.</p>
+
+    <h2 style="font-size:27px;font-weight:500;letter-spacing:-0.015em;margin:52px 0 22px;">What to steal from this</h2>
+
+    <ul style="list-style:none;padding:0;margin:0 0 26px;">
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">Match the boundary to the threat.</strong> Code you wrote → a container is fine. Code a model wrote under adversarial influence → you want a boundary that survives a host-kernel bug. That's hardware virtualization.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">microVMs make that cheap.</strong> VM-grade isolation and fast/dense/cheap stopped being opposites the moment Firecracker existed.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:18px;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">Price in the userland.</strong> No shared FS means you <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">mkfs</code> a disk per run. No init means you write PID 1. No users means you write <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em;background:#EAEEF4;border:1px solid #DCE2EA;padding:1px 6px;border-radius:5px;">/etc/passwd</code>. The isolation is the free part.</li>
+      <li style="position:relative;padding-left:26px;font-size:19px;line-height:1.6;color:#1f2731;margin-bottom:0;text-wrap:pretty;"><span style="position:absolute;left:0;top:0;color:#94a5b6;font-family:'JetBrains Mono',monospace;">—</span><strong style="font-weight:600;">Keep long-lived secrets out of the sandbox.</strong> Hand it a scoped, expiring token and proxy the privileged work. A hard boundary plus a boring breach is the whole game.</li>
+    </ul>
+
+    <footer style="padding-top:64px;margin-top:56px;border-top:1px solid #E1E5EB;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;">
+      <a href="/writing" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#68809a;text-decoration:none;">← all writing</a>
+      <div style="display:flex;gap:20px;font-family:'JetBrains Mono',monospace;font-size:13px;">
+        <a href="https://github.com/Kushagra1480" target="_blank" style="text-decoration:none;">GitHub</a>
+        <a href="https://linkedin.com/in/kushagra-kartik" target="_blank" style="text-decoration:none;">LinkedIn</a>
+      </div>
+    </footer>
+
+  </article>
