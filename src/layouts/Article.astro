@@ -70,20 +70,21 @@ const { title, body, mermaid } = Astro.props;
 )}
 
 <style is:global>
-  .article { max-width: 680px; margin: 0 auto; }
+  /* long-form reading stays in Newsreader serif; the rest of the site is Inter */
+  .article { max-width: 680px; margin: 0 auto; font-family: var(--serif); }
   .article a { text-decoration: none; }
   .article p a,
   .article li a {
     text-decoration: underline;
     text-underline-offset: 3px;
     text-decoration-thickness: 1px;
-    text-decoration-color: #C1CBD7;
+    text-decoration-color: var(--hair);
     transition: color 0.3s ease, text-decoration-color 0.3s ease;
   }
   .article p a:hover,
   .article li a:hover {
-    color: #476080;
-    text-decoration-color: #476080;
+    color: var(--accent);
+    text-decoration-color: var(--accent);
   }
   .mermaid-target {
     background: #ffffff;

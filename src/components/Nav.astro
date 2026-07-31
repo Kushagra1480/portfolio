@@ -1,16 +1,28 @@
 ---
 const items = [
-  { id: 'home', label: 'home', href: '/' },
-  { id: 'projects', label: 'projects', href: '/projects' },
-  { id: 'writing', label: 'writing', href: '/writing' },
+  { id: 'home', label: 'home', href: '/', ix: '00' },
+  { id: 'projects', label: 'projects', href: '/projects', ix: '01' },
+  { id: 'writing', label: 'writing', href: '/writing', ix: '02' },
 ];
 ---
-<nav class="site-nav" id="site-nav" transition:persist>
-  {items.map((n) => (
-    <a class="nav-item" data-id={n.id} href={n.href}>
-      <span class="nav-box"></span><span class="nav-label">{n.label}</span>
-    </a>
-  ))}
+<nav class="site-nav" id="site-nav" transition:persist aria-label="Sections">
+  <div class="nav-rail" id="nav-rail">
+    <span class="nav-readhead" id="nav-readhead"></span>
+    <span class="nav-bracket" id="nav-bracket"></span>
+    {items.map((n) => (
+      <a class="nav-item" data-id={n.id} href={n.href}>
+        <span class="nav-ix">{n.ix}</span><span class="nav-label">{n.label}</span>
+      </a>
+    ))}
+  </div>
+  <div class="nav-hint" aria-hidden="true">
+    <span class="hint-line"></span>
+    <span class="hint-keys">
+      <span class="kc mod">⇧</span><span class="kc">W</span>
+      <span class="kc mod">⇧</span><span class="kc">S</span>
+    </span>
+    <span class="hint-label">move sections</span>
+  </div>
 </nav>
 
 <script is:inline>
@@ -25,38 +37,41 @@ const items = [
       return 'home';
     }
 
-    function paint(animateIn) {
+    function place(el, target) {
+      if (!el || !target) return;
+      target.style.transform = 'translateY(' + el.offsetTop + 'px)';
+      target.style.width = el.offsetWidth + 'px';
+      target.style.height = el.offsetHeight + 'px';
+    }
+
+    function paint() {
       const nav = document.getElementById('site-nav');
       if (!nav) return;
       const active = currentId();
+      const bracket = document.getElementById('nav-bracket');
+      let activeEl = null;
       nav.querySelectorAll('.nav-item').forEach((a) => {
-        const box = a.querySelector('.nav-box');
         const on = a.dataset.id === active;
         a.classList.toggle('is-active', on);
-        if (on) {
-          if (animateIn) {
-            box.style.animation = 'none';
-            void box.offsetWidth;
-            box.style.animation = 'navBoxIn 0.42s cubic-bezier(0.16,1,0.3,1) forwards';
-          }
-        } else {
-          box.style.animation = '';
-        }
+        if (on) activeEl = a;
       });
+      place(activeEl, bracket);
     }
 
-    // Slide the leaving section's box out before the swap.
-    document.addEventListener('astro:before-swap', () => {
+    function wire() {
       const nav = document.getElementById('site-nav');
-      if (!nav) return;
-      const a = nav.querySelector('.nav-item[data-id="' + currentId() + '"]');
-      if (a) {
-        const box = a.querySelector('.nav-box');
-        box.style.animation = 'navBoxOut 0.24s cubic-bezier(0.5,0,0.75,0) forwards';
-      }
-    });
+      if (!nav || nav.__wired) { paint(); return; }
+      nav.__wired = true;
+      const readhead = document.getElementById('nav-readhead');
+      nav.querySelectorAll('.nav-item').forEach((a) => {
+        a.addEventListener('mouseenter', () => { place(a, readhead); readhead.style.opacity = '1'; });
+      });
+      const rail = document.getElementById('nav-rail');
+      rail.addEventListener('mouseleave', () => { readhead.style.opacity = '0'; });
+      window.addEventListener('resize', () => { paint(); if (readhead) readhead.style.opacity = '0'; });
+    }
 
-    document.addEventListener('astro:page-load', () => paint(true));
+    document.addEventListener('astro:page-load', () => { wire(); paint(); });
 
     if (!window.__navKeys) {
       window.__navKeys = true;
@@ -76,6 +91,8 @@ const items = [
       });
     }
 
-    paint(false);
+    wire();
+    paint();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(paint);
   })();
 </script>
