@@ -6,13 +6,11 @@ import '../styles/global.css';
 interface Props {
   title?: string;
   description?: string;
-  fonts?: string;
 }
 
 const {
   title = 'Kushagra Kartik',
   description = 'agent runtime @ 1Sphere AI — founding engineer, agent runtimes and sandboxing.',
-  fonts = "family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap",
 } = Astro.props;
 ---
 <!doctype html>
@@ -22,9 +20,9 @@ const {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href={`https://fonts.googleapis.com/css2?${fonts}`} rel="stylesheet" />
+    <link rel="preload" href="/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/inter-600.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/jbmono-400.woff2" as="font" type="font/woff2" crossorigin />
     <ViewTransitions />
   </head>
   <body>
