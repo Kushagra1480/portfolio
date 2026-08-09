@@ -71,7 +71,22 @@ const items = [
       window.addEventListener('resize', () => { paint(); if (readhead) readhead.style.opacity = '0'; });
     }
 
+    // play the entrance animation only on the first real load; the nav
+    // persists across view transitions, so re-inserting it must not replay it.
+    function enterOnce() {
+      if (window.__navEntered) return;
+      window.__navEntered = true;
+      const nav = document.getElementById('site-nav');
+      if (!nav) return;
+      nav.classList.add('nav-enter');
+      nav.addEventListener('animationend', () => nav.classList.remove('nav-enter'), { once: true });
+    }
+
     document.addEventListener('astro:page-load', () => { wire(); paint(); });
+    document.addEventListener('astro:before-swap', () => {
+      const nav = document.getElementById('site-nav');
+      if (nav) nav.classList.remove('nav-enter');
+    });
 
     if (!window.__navKeys) {
       window.__navKeys = true;
@@ -91,6 +106,7 @@ const items = [
       });
     }
 
+    enterOnce();
     wire();
     paint();
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(paint);
