@@ -85,8 +85,9 @@ main { view-transition-name: main-content; }
   justify-content: center;
   align-items: flex-end;
   padding: 0 30px;
-  animation: navIn 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
+/* entrance plays once, on first load only — not on persisted re-insertion */
+.site-nav.nav-enter { animation: navIn 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 .nav-rail { position: relative; display: flex; flex-direction: column; }
 
 .nav-item {
