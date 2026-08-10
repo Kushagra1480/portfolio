@@ -34,18 +34,19 @@ const { title, body, mermaid } = Astro.props;
             securityLevel: 'loose',
             fontFamily: "'JetBrains Mono', monospace",
             themeVariables: {
-              primaryColor: '#F8F8F8',
-              primaryBorderColor: '#94a5b6',
-              primaryTextColor: '#111111',
-              lineColor: '#8a8276',
-              actorBkg: '#EAEEF4',
-              actorBorder: '#94a5b6',
-              actorTextColor: '#111111',
-              signalColor: '#455d76',
-              signalTextColor: '#1f2731',
-              noteBkgColor: '#161a20',
-              noteTextColor: '#e4e8ee',
-              noteBorderColor: '#161a20',
+              background: '#181825',
+              primaryColor: '#313244',
+              primaryBorderColor: '#585b70',
+              primaryTextColor: '#cdd6f4',
+              lineColor: '#9399b2',
+              actorBkg: '#313244',
+              actorBorder: '#585b70',
+              actorTextColor: '#cdd6f4',
+              signalColor: '#9399b2',
+              signalTextColor: '#cdd6f4',
+              noteBkgColor: '#cba6f7',
+              noteTextColor: '#1e1e2e',
+              noteBorderColor: '#cba6f7',
             },
           });
           try { window.mermaid.run({ nodes: [el] }); } catch (e) {}
@@ -87,8 +88,8 @@ const { title, body, mermaid } = Astro.props;
     text-decoration-color: var(--accent);
   }
   .mermaid-target {
-    background: #ffffff;
-    border: 1px solid #DCE2EA;
+    background: #181825;
+    border: 1px solid #313244;
     border-radius: 12px;
     padding: 26px 20px;
     margin: 0;
