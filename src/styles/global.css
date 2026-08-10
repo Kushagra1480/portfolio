@@ -105,17 +105,9 @@ main { view-transition-name: main-content; }
   text-decoration: none;
   -webkit-tap-highlight-color: transparent;
 }
-.nav-ix {
-  font-size: 9px;
-  color: var(--ink-3);
-  opacity: 0.55;
-  font-variant-numeric: tabular-nums;
-  transition: color 0.35s ease, opacity 0.35s ease;
-}
 .nav-label { color: var(--ink-3); transition: color 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
 .nav-item:hover .nav-label { color: var(--ink-2); }
 .nav-item.is-active .nav-label { color: var(--ink); }
-.nav-item.is-active .nav-ix { color: var(--accent); opacity: 1; }
 .nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 5px; }
 
 .nav-bracket {
