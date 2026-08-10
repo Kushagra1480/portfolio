@@ -111,18 +111,18 @@ main { view-transition-name: main-content; }
 .nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 5px; }
 
 .nav-bracket {
-  position: absolute; right: 0; top: 0; z-index: 1; pointer-events: none;
+  position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none;
   transition: transform 0.52s cubic-bezier(0.34, 1.42, 0.5, 1), width 0.52s cubic-bezier(0.34, 1.42, 0.5, 1);
 }
 .nav-bracket::before, .nav-bracket::after {
   position: absolute; top: 50%; transform: translateY(-50%);
   font-family: var(--mono); font-size: 19px; font-weight: 400; color: var(--accent);
 }
-.nav-bracket::before { content: "{"; left: 1px; }
-.nav-bracket::after  { content: "}"; right: 3px; }
+.nav-bracket::before { content: "{"; left: 0; }
+.nav-bracket::after  { content: "}"; right: 0; }
 
 .nav-readhead {
-  position: absolute; right: 0; top: 0; z-index: 0; pointer-events: none;
+  position: absolute; left: 0; top: 0; z-index: 0; pointer-events: none;
   border-radius: 6px; background: rgba(25, 26, 21, 0.05); opacity: 0;
   transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), width 0.3s cubic-bezier(0.22, 1, 0.36, 1), height 0.3s, opacity 0.22s;
 }

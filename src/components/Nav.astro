@@ -37,11 +37,19 @@ const items = [
       return 'home';
     }
 
-    function place(el, target) {
-      if (!el || !target) return;
-      target.style.transform = 'translateY(' + el.offsetTop + 'px)';
-      target.style.width = el.offsetWidth + 'px';
-      target.style.height = el.offsetHeight + 'px';
+    // size the marker to the label text (with padding), not the full-width
+    // nav item — so the braces hug the word, not the container.
+    function place(item, target, pad) {
+      if (!item || !target) return;
+      var rail = document.getElementById('nav-rail');
+      var label = item.querySelector('.nav-label');
+      if (!rail || !label) return;
+      var rr = rail.getBoundingClientRect();
+      var lr = label.getBoundingClientRect();
+      var ir = item.getBoundingClientRect();
+      target.style.width = (lr.width + pad * 2) + 'px';
+      target.style.height = ir.height + 'px';
+      target.style.transform = 'translate(' + ((lr.left - rr.left) - pad) + 'px,' + (ir.top - rr.top) + 'px)';
     }
 
     function paint() {
@@ -55,7 +63,7 @@ const items = [
         a.classList.toggle('is-active', on);
         if (on) activeEl = a;
       });
-      place(activeEl, bracket);
+      place(activeEl, bracket, 13);
     }
 
     function wire() {
@@ -64,7 +72,7 @@ const items = [
       nav.__wired = true;
       const readhead = document.getElementById('nav-readhead');
       nav.querySelectorAll('.nav-item').forEach((a) => {
-        a.addEventListener('mouseenter', () => { place(a, readhead); readhead.style.opacity = '1'; });
+        a.addEventListener('mouseenter', () => { place(a, readhead, 10); readhead.style.opacity = '1'; });
       });
       const rail = document.getElementById('nav-rail');
       rail.addEventListener('mouseleave', () => { readhead.style.opacity = '0'; });
